@@ -20,3 +20,10 @@ export interface Note {
   anchor_start: number | null; anchor_end: number | null; color: string | null;
   created_at: number; updated_at: number; deleted_at?: number | null;
 }
+export interface Folder {
+  name: string; path: string; book_count: number; finished_count: number; reading_count: number;
+  cover_book_id: number; cover_etag: string | null;
+}
+export interface BrowseResult {
+  library: Library; path: string; breadcrumbs: { name: string; path: string }[]; folders: Folder[]; books: Book[];
+}
