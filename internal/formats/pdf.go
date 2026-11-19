@@ -21,28 +21,22 @@ var (
 	pdfPool     pdfium.Pool
 	pdfPoolErr  error
 	pdfWorkers  = 1
-	pdfRoots    []string
 )
 
-// SetupPDF sets how many pdfium instances may run at once and which folders
-// the WebAssembly sandbox can read. Call before first use.
+// SetupPDF sets how many pdfium instances may run at once. Call before first use.
 //
-// By default go-pdfium mounts the whole host filesystem into the sandbox, and
-// pdfium's font lookup then reads arbitrary files (and can block forever on a
-// FIFO or socket). Only the library folders are mounted instead; pdfium's
-// built-in fonts cover the standard PDF fonts.
-func SetupPDF(workers int, roots []string) {
+// The WebAssembly sandbox gets no host folders at all: PDFs are handed to
+// pdfium through Go (FileReader), so libraries can be added at runtime. (By
+// default go-pdfium mounts the whole host filesystem, and pdfium's font lookup
+// then reads arbitrary files and can block forever on a FIFO or socket.)
+// pdfium's built-in fonts cover the standard PDF fonts.
+func SetupPDF(workers int) {
 	pdfWorkers = max(1, workers)
-	pdfRoots = roots
 }
 
 func getPool() (pdfium.Pool, error) {
 	pdfPoolOnce.Do(func() {
-		fsc := wazero.NewFSConfig()
-		for _, r := range pdfRoots {
-			fsc = fsc.WithReadOnlyDirMount(r, r)
-		}
-		pdfPool, pdfPoolErr = webassembly.Init(webassembly.Config{MinIdle: 0, MaxIdle: 1, MaxTotal: pdfWorkers, FSConfig: fsc})
+		pdfPool, pdfPoolErr = webassembly.Init(webassembly.Config{MinIdle: 0, MaxIdle: 1, MaxTotal: pdfWorkers, FSConfig: wazero.NewFSConfig()})
 	})
 	return pdfPool, pdfPoolErr
 }

@@ -1,14 +1,18 @@
 # bookman configuration. Every key can be overridden by an environment variable:
 # BOOKMAN_LISTEN, BOOKMAN_DATABASE_URL, BOOKMAN_RESCAN_INTERVAL, BOOKMAN_THUMB_WORKERS,
-# BOOKMAN_PAGE_CACHE_MB, BOOKMAN_WATCH and BOOKMAN_LIBRARIES ("Books=/media/books;Comics=/media/comics").
+# BOOKMAN_PAGE_CACHE_MB, BOOKMAN_WATCH, BOOKMAN_MEDIA_ROOTS and BOOKMAN_LIBRARIES ("Books=/media/books;Comics=/media/comics").
 
 listen = ":8080"
 
 # PostgreSQL. Leave empty to use the libpq variables PGHOST, PGPORT, PGDATABASE, PGUSER, PGPASSWORD.
 database_url = ""
 
-# Each library is a folder. Books are grouped into series by their parent folder.
-# `exclude` skips sub-folders (relative to path), e.g. one that is its own library.
+# Folders the admin UI may browse and add libraries from (Admin -> Libraries).
+media_roots = ["/media"]
+
+# The libraries to start with. Only used on the first start; after that,
+# libraries are managed in Admin -> Libraries. `exclude` skips sub-folders
+# (relative to path).
 libraries = [
   { name = "Books", path = "/media/books", exclude = ["comics"] },
   { name = "Comics", path = "/media/books/comics" },

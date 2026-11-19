@@ -1,4 +1,4 @@
-import type { Book, BrowseResult, Library, Note, Progress, ReadingSession, Series, User } from './types';
+import type { AdminLibrary, Book, BrowseResult, FsListing, Library, Note, Progress, ReadingSession, Series, User } from './types';
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) { super(message); }
@@ -61,6 +61,12 @@ export const api = {
 
   scan: () => request<unknown>('POST', '/admin/scan'),
   scanStatus: () => request<{ scan: any; covers_pending: number }>('GET', '/admin/scan'),
+  adminLibraries: () => request<{ libraries: AdminLibrary[]; media_roots: string[] }>('GET', '/admin/libraries'),
+  createLibrary: (l: { name: string; path: string; exclude: string[] }) => request<AdminLibrary>('POST', '/admin/libraries', l),
+  updateLibrary: (id: number, l: { name: string; path: string; exclude: string[] }) => request<AdminLibrary>('PATCH', `/admin/libraries/${id}`, l),
+  removeLibrary: (id: number) => request<unknown>('DELETE', `/admin/libraries/${id}`),
+  scanLibrary: (id: number) => request<unknown>('POST', `/admin/libraries/${id}/scan`),
+  fs: (path: string) => request<FsListing>('GET', '/admin/fs?' + new URLSearchParams({ path })),
   users: () => request<User[]>('GET', '/admin/users'),
   createUser: (username: string, password: string, is_admin: boolean) =>
     request<User>('POST', '/admin/users', { username, password, is_admin }),

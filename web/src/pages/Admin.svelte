@@ -2,7 +2,40 @@
   import { onMount } from 'svelte';
   import { api } from '../lib/api';
   import { dateTime } from '../lib/format';
-  import type { User } from '../lib/types';
+  import { refreshLibraries } from '../lib/libraries.svelte';
+  import type { AdminLibrary, User } from '../lib/types';
+  import LibraryEditor from '../components/LibraryEditor.svelte';
+
+  let libs = $state<AdminLibrary[]>([]);
+  let mediaRoots = $state<string[]>([]);
+  let editing = $state<AdminLibrary | 'new' | null>(null);
+  let notice = $state('');
+
+  async function loadLibraries() {
+    try {
+      const r = await api.adminLibraries();
+      libs = r.libraries; mediaRoots = r.media_roots;
+    } catch (e: any) { error = e.message; }
+  }
+  async function saved(l: AdminLibrary) {
+    notice = `${editing === 'new' ? 'Added' : 'Saved'} ${l.name}; scanning it now.`;
+    editing = null;
+    await loadLibraries();
+    refreshLibraries().catch(() => {});
+    setTimeout(refresh, 300);
+  }
+  async function removeLib(l: AdminLibrary) {
+    if (!confirm(`Remove the library "${l.name}"?\n\nIts books disappear from bookman. Files on disk are not touched, and reading progress and notes are kept: adding the same folder again brings everything back.`)) return;
+    try {
+      await api.removeLibrary(l.id);
+      notice = `Removed ${l.name}.`;
+      await loadLibraries();
+      refreshLibraries().catch(() => {});
+    } catch (e: any) { error = e.message; }
+  }
+  async function scanLib(l: AdminLibrary) {
+    try { await api.scanLibrary(l.id); setTimeout(refresh, 300); } catch (e: any) { error = e.message; }
+  }
 
   let users = $state<User[]>([]);
   let scan = $state<any>(null);
@@ -20,6 +53,7 @@
     } catch {}
   }
   onMount(() => {
+    loadLibraries();
     api.users().then((u) => (users = u)).catch((e) => (error = e.message));
     refresh();
     const t = setInterval(refresh, 3000);
@@ -47,10 +81,50 @@
   <h1>Admin</h1>
   {#if error}<p class="error">{error}</p>{/if}
   <section class="card">
-    <div class="row"><h2>Library scan</h2><div class="spacer"></div><button onclick={startScan} disabled={scan?.running}>{scan?.running ? 'Scanning…' : 'Scan now'}</button></div>
+    <div class="row">
+      <h2>Libraries</h2>
+      <div class="spacer"></div>
+      {#if editing !== 'new'}<button class="primary" onclick={() => (editing = 'new')}>+ Add library</button>{/if}
+    </div>
+    {#if notice}<p class="muted">{notice}</p>{/if}
+    {#if editing === 'new'}
+      <LibraryEditor onsaved={saved} oncancel={() => (editing = null)} />
+    {/if}
+    {#if libs.length === 0 && editing !== 'new'}
+      <p class="muted">No libraries yet. Add a folder of PDFs and comics to get started.</p>
+    {/if}
+    <div class="libs">
+      {#each libs as l (l.id)}
+        {#if editing !== 'new' && editing?.id === l.id}
+          <LibraryEditor library={l} onsaved={saved} oncancel={() => (editing = null)} />
+        {:else}
+          <div class="lib">
+            <div class="info">
+              <a class="name" href="/library/{l.id}">{l.name}</a>
+              <code class="path">{l.path}</code>
+              <span class="faint small">
+                {l.book_count} {l.book_count === 1 ? 'book' : 'books'}
+                {#if l.exclude.length} · skips {l.exclude.join(', ')}{/if}
+              </span>
+              {#if !l.exists}<span class="error small">The folder is missing or can't be read.</span>{/if}
+            </div>
+            <div class="actions">
+              <button onclick={() => scanLib(l)} disabled={scan?.running}>Scan</button>
+              <button onclick={() => (editing = l)}>Edit</button>
+              <button class="danger" onclick={() => removeLib(l)}>Remove</button>
+            </div>
+          </div>
+        {/if}
+      {/each}
+    </div>
+    <p class="faint small">Folders you can add from: {mediaRoots.join(', ')} (<code>media_roots</code> in the config file).</p>
+  </section>
+
+  <section class="card">
+    <div class="row"><h2>Library scan</h2><div class="spacer"></div><button onclick={startScan} disabled={scan?.running}>{scan?.running ? 'Scanning…' : 'Scan all libraries'}</button></div>
     {#if scan}
       <p class="muted">
-        {#if scan.running}Running since {dateTime(scan.started_at)}.{:else if scan.finished_at}Last scan finished {dateTime(scan.finished_at)}.{/if}
+        {#if scan.running}Scanning {scan.library || 'all libraries'} since {dateTime(scan.started_at)}.{:else if scan.finished_at}Last scan finished {dateTime(scan.finished_at)}.{/if}
         {scan.seen} files seen, {scan.added} added, {scan.moved} moved, {scan.missing} missing, {scan.errors} errors.
         {coversPending} covers waiting.
       </p>
@@ -80,4 +154,10 @@
   th, td { text-align: left; padding: 6px 10px 6px 0; border-bottom: 1px solid var(--border); }
   th { color: var(--fg-faint); font-weight: 500; }
   .small { font-size: 0.85rem; }
+  .libs { display: flex; flex-direction: column; gap: 10px; margin: 12px 0; }
+  .lib { display: flex; align-items: center; gap: 12px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; flex-wrap: wrap; }
+  .info { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 260px; }
+  .name { font-weight: 650; color: var(--fg); }
+  .path { font-size: 0.82rem; color: var(--fg-muted); overflow-wrap: anywhere; }
+  .actions { display: flex; gap: 6px; }
 </style>

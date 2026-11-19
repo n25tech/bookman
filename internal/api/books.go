@@ -16,7 +16,7 @@ import (
 )
 
 func (s *Server) libraries(w http.ResponseWriter, r *http.Request) {
-	libs, err := s.DB.Libraries(r.Context(), s.Scanner.Roots())
+	libs, err := s.DB.Libraries(r.Context())
 	if err != nil {
 		serverError(w, r, err)
 		return
