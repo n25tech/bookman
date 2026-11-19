@@ -312,11 +312,24 @@ func TestAPI(t *testing.T) {
 	if len(notes) != 1 {
 		t.Fatal("undo failed")
 	}
+	// A book note (page 0) with page links; it can't carry a text anchor.
+	if code := c.do("POST", "/api/books/"+bid+"/notes", map[string]any{"page": 0, "body_md": "Themes: see [[p. 3]] and [the ending](#page=4)."}, nil); code != 201 {
+		t.Fatalf("book note: %d", code)
+	}
+	if code := c.do("POST", "/api/books/"+bid+"/notes", map[string]any{"page": -1, "body_md": "x"}, nil); code != 400 {
+		t.Fatalf("negative page: %d", code)
+	}
+	c.do("GET", "/api/books/"+bid+"/notes", nil, &notes)
+	if len(notes) != 2 || notes[0].Page != 0 {
+		t.Fatalf("book note should list first: %+v", notes)
+	}
 	res, _ = c.http.Get(ts.URL + "/api/books/" + bid + "/notes/export.md")
 	var md bytes.Buffer
 	md.ReadFrom(res.Body)
 	res.Body.Close()
-	if !strings.Contains(md.String(), "## Page 2") || !strings.Contains(md.String(), "edited") {
+	if !strings.Contains(md.String(), "## Book notes\n\nThemes: see p. 3 and the ending (p. 4).") ||
+		strings.Index(md.String(), "## Book notes") > strings.Index(md.String(), "## Page 2") ||
+		!strings.Contains(md.String(), "## Page 2") || !strings.Contains(md.String(), "edited") {
 		t.Fatalf("export: %s", md.String())
 	}
 

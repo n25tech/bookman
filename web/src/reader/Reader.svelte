@@ -143,7 +143,8 @@
     router.go(book ? `/library/${book.library_id}` : '/');
   }
 
-  function jumpToNote(n: Note) { viewer?.flashNote(n); }
+  function jumpToNote(n: Note) { if (n.page > 0) viewer?.flashNote(n); }
+  function jumpToPage(page: number) { viewer?.goTo(page, 0); }
   const shownPercent = $derived(book ? Math.min(1, (pos.page - 1 + pos.offset) / Math.max(1, book.page_count)) : 0);
 </script>
 
@@ -175,7 +176,7 @@
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div class="divider" onpointerdown={startDrag} title="Drag to resize"></div>
         <aside class="notes">
-          <NotesPanel {book} bind:notes currentPage={pos.page} bind:focusId={focusNote} onjump={jumpToNote} onclose={() => setPanel(false)} />
+          <NotesPanel {book} bind:notes currentPage={pos.page} bind:focusId={focusNote} onjump={jumpToNote} onpage={jumpToPage} onclose={() => setPanel(false)} />
         </aside>
       {/if}
     </div>

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -34,8 +35,13 @@ func (s *Server) createNote(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, maxJSONBody, &n) {
 		return
 	}
-	if n.Page < 1 || n.Page > max(b.PageCount, 1) {
+	// Page 0 is a book note, about the whole book rather than one page.
+	if n.Page < 0 || n.Page > max(b.PageCount, 1) {
 		writeError(w, http.StatusBadRequest, "page out of range")
+		return
+	}
+	if n.Page == 0 && (n.Quote != nil || n.AnchorStart != nil) {
+		writeError(w, http.StatusBadRequest, "a book note can't be anchored to text")
 		return
 	}
 	if len(n.BodyMD) > maxNoteBody {
@@ -111,7 +117,20 @@ func (s *Server) exportNotes(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(md))
 }
 
-// NotesMarkdown renders a book's notes as one Markdown document, grouped by page.
+// Page links inside notes: [[p. 42]] (or [[42]], [[page 42]]) and [label](#page=42).
+var (
+	pageRef   = regexp.MustCompile(`\[\[\s*(?:(?i:p\.?|page)\s*)?(\d+)\s*\]\]`)
+	pageLabel = regexp.MustCompile(`\[([^\]]+)\]\(#page=(\d+)\)`)
+)
+
+// plainPageLinks turns page links into plain text for the Markdown export.
+func plainPageLinks(s string) string {
+	s = pageLabel.ReplaceAllString(s, "$1 (p. $2)")
+	return pageRef.ReplaceAllString(s, "p. $1")
+}
+
+// NotesMarkdown renders a book's notes as one Markdown document: book notes
+// first, then page notes grouped by page.
 func NotesMarkdown(b db.Book, notes []db.Note) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "# %s\n\n", b.Title)
@@ -123,7 +142,11 @@ func NotesMarkdown(b db.Book, notes []db.Note) string {
 	for _, n := range notes {
 		if n.Page != page {
 			page = n.Page
-			fmt.Fprintf(&sb, "\n## Page %d\n", page)
+			if page == 0 {
+				sb.WriteString("\n## Book notes\n")
+			} else {
+				fmt.Fprintf(&sb, "\n## Page %d\n", page)
+			}
 		}
 		sb.WriteString("\n")
 		if n.Quote != nil && *n.Quote != "" {
@@ -133,7 +156,7 @@ func NotesMarkdown(b db.Book, notes []db.Note) string {
 			sb.WriteString("\n")
 		}
 		if body := strings.TrimSpace(n.BodyMD); body != "" {
-			sb.WriteString(body + "\n")
+			sb.WriteString(plainPageLinks(body) + "\n")
 		}
 	}
 	return sb.String()
