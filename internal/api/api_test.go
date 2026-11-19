@@ -69,6 +69,27 @@ func writeCBZ(t *testing.T, path string, pages int) {
 	f.Close()
 }
 
+// writeCP437CBZ writes a zip whose entry names are CP437 bytes (no UTF-8 flag),
+// as old Windows zip tools do.
+func writeCP437CBZ(t *testing.T, path string) {
+	os.MkdirAll(filepath.Dir(path), 0o755)
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	zw := zip.NewWriter(f)
+	for _, name := range []string{"caf\x82 01.png", "caf\x82 02.png"} {
+		w, err := zw.CreateHeader(&zip.FileHeader{Name: name, NonUTF8: true, Method: zip.Store})
+		if err != nil {
+			t.Fatal(err)
+		}
+		img := image.NewRGBA(image.Rect(0, 0, 4, 6))
+		png.Encode(w, img)
+	}
+	zw.Close()
+	f.Close()
+}
+
 type client struct {
 	t    *testing.T
 	base string
@@ -107,6 +128,7 @@ func TestAPI(t *testing.T) {
 	writeCBZ(t, filepath.Join(root, "Series A", "Issue 10.cbz"), 4)
 	writeCBZ(t, filepath.Join(root, "Excluded", "skip.cbz"), 2)
 	os.WriteFile(filepath.Join(root, "notes.txt"), []byte("not a book"), 0o644)
+	writeCP437CBZ(t, filepath.Join(root, "Old", "cp437.cbz"))
 
 	covers := thumbs.New(d, 1)
 	sc := library.NewScanner(d, []config.Library{{Name: "Comics", Path: root, Exclude: []string{"Excluded"}}}, covers)
@@ -114,7 +136,7 @@ func TestAPI(t *testing.T) {
 		t.Fatal(err)
 	}
 	sc.ScanAll(ctx)
-	if st := sc.Status(); st.Added != 2 || st.Errors != 0 {
+	if st := sc.Status(); st.Added != 3 || st.Errors != 0 {
 		t.Fatalf("scan status %+v", st)
 	}
 	cctx, cancel := context.WithCancel(ctx)
@@ -149,14 +171,28 @@ func TestAPI(t *testing.T) {
 
 	var libs []db.Library
 	c.do("GET", "/api/libraries", nil, &libs)
-	if len(libs) != 1 || libs[0].BookCount != 2 {
+	if len(libs) != 1 || libs[0].BookCount != 3 {
 		t.Fatalf("libraries %+v", libs)
 	}
 	var series []db.Series
 	c.do("GET", "/api/libraries/"+itoa(libs[0].ID)+"/series", nil, &series)
-	if len(series) != 1 || series[0].Name != "Series A" {
+	if len(series) != 2 || series[1].Name != "Series A" {
 		t.Fatalf("series %+v", series)
 	}
+	// Pages with non-UTF-8 entry names are stored and served.
+	var old struct{ Books []db.Book }
+	c.do("GET", "/api/series/"+itoa(series[0].ID), nil, &old)
+	if len(old.Books) != 1 || old.Books[0].PageCount != 2 {
+		t.Fatalf("cp437 book: %+v", old.Books)
+	}
+	for _, n := range []string{"1", "2"} {
+		res, _ := c.http.Get(ts.URL + "/api/books/" + itoa(old.Books[0].ID) + "/pages/" + n)
+		res.Body.Close()
+		if res.StatusCode != 200 {
+			t.Fatalf("cp437 page %s: %d", n, res.StatusCode)
+		}
+	}
+	series = series[1:]
 	var sv struct{ Books []db.Book }
 	c.do("GET", "/api/series/"+itoa(series[0].ID), nil, &sv)
 	if len(sv.Books) != 2 || sv.Books[0].Title != "Issue 2" || sv.Books[1].Title != "Issue 10" {

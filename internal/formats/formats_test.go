@@ -11,6 +11,7 @@ import (
 	"reflect"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 func TestNaturalSort(t *testing.T) {
@@ -137,5 +138,20 @@ func TestRealFiles(t *testing.T) {
 				t.Logf("last page %s: %d bytes, %d pages cached on the way", last, len(data), seen)
 			}
 		})
+	}
+}
+
+func TestEntryNameEncoding(t *testing.T) {
+	for _, name := range []string{"pages/01.jpg", "p\x82ge.png", "hex:looks-encoded.png", ""} {
+		enc := EncodeEntryName(name)
+		if !utf8.ValidString(enc) {
+			t.Errorf("%q encodes to invalid UTF-8 %q", name, enc)
+		}
+		if got := DecodeEntryName(enc); got != name {
+			t.Errorf("round trip %q -> %q -> %q", name, enc, got)
+		}
+	}
+	if EncodeEntryName("plain.jpg") != "plain.jpg" {
+		t.Error("valid names must be stored unchanged")
 	}
 }
