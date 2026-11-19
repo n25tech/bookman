@@ -12,6 +12,8 @@ configMapGenerator:
   - name: bookman-config
     files:
       - bookman.toml
+# CI (.github/workflows/ci.yml) pushes :<12-char sha> and :prod on every merge to main;
+# restart the Deployment to roll out. Pin a build by setting newTag to a sha.
 images:
-  - name: registry.home/bookman/bookman
-    newTag: latest
+  - name: ghcr.io/n25tech/bookman
+    newTag: prod

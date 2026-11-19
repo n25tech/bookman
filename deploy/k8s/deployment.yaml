@@ -31,7 +31,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: bookman
-          image: registry.home/bookman/bookman
+          image: ghcr.io/n25tech/bookman
           imagePullPolicy: Always
           args: ["-config", "/etc/bookman/bookman.toml"]
           envFrom:

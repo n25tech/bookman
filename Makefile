@@ -1,6 +1,6 @@
 # bookman: see README.md
 VERSION  ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
-IMAGE    ?= registry.home/bookman/bookman
+IMAGE    ?= ghcr.io/n25tech/bookman
 GO       ?= go
 LDFLAGS  := -s -w -X main.version=$(VERSION)
 
