@@ -1,0 +1,20 @@
+# bookman configuration. Every key can be overridden by an environment variable:
+# BOOKMAN_LISTEN, BOOKMAN_DATABASE_URL, BOOKMAN_RESCAN_INTERVAL, BOOKMAN_THUMB_WORKERS,
+# BOOKMAN_PAGE_CACHE_MB, BOOKMAN_WATCH and BOOKMAN_LIBRARIES ("Books=/media/books;Comics=/media/comics").
+
+listen = ":8080"
+
+# PostgreSQL. Leave empty to use the libpq variables PGHOST, PGPORT, PGDATABASE, PGUSER, PGPASSWORD.
+database_url = ""
+
+# Each library is a folder. Books are grouped into series by their parent folder.
+# `exclude` skips sub-folders (relative to path), e.g. one that is its own library.
+libraries = [
+  { name = "Books", path = "/media/books", exclude = ["comics"] },
+  { name = "Comics", path = "/media/books/comics" },
+]
+
+rescan_interval = "6h"   # full rescan as a safety net next to the file watcher
+watch = true             # follow changes with inotify
+thumb_workers = 2        # cover rendering workers (and pdfium instances)
+page_cache_mb = 128      # in-memory cache of extracted comic pages

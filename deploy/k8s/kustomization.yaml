@@ -1,0 +1,17 @@
+# bookman at https://bookman.home: `kubectl apply -k deploy/k8s` (see README "Kubernetes").
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: bookman
+resources:
+  - namespace.yaml
+  - deployment.yaml
+  - service.yaml
+  - route.yaml
+configMapGenerator:
+  # The config file; editing it and re-applying rolls the pod (the name gets a hash).
+  - name: bookman-config
+    files:
+      - bookman.toml
+images:
+  - name: registry.home/bookman/bookman
+    newTag: latest

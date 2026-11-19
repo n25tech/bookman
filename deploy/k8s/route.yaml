@@ -1,0 +1,22 @@
+# https://bookman.home through the Cilium home-gateway, behind the edge Envoy (TLS on :443).
+# bookman.k8s.master.home is covered by the edge cert's *.k8s.master.home today;
+# bookman.home needs adding to the edge cert (README step 3).
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: bookman-route
+spec:
+  parentRefs:
+    - name: home-gateway
+      namespace: default
+  hostnames:
+    - "bookman.home"
+    - "bookman.k8s.master.home"
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: bookman
+          port: 8080

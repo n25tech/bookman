@@ -1,0 +1,88 @@
+# bookman: one pod on a12, which has the ebooks on disk. The library is mounted
+# read-only; all state (users, progress, notes, covers) is in PostgreSQL
+# (database bookman on postgres.dbs.svc), so the pod has no volume of its own.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bookman
+  labels:
+    app: bookman
+spec:
+  replicas: 1
+  # One scanner/watcher at a time; the old pod stops before the new one starts.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: bookman
+  template:
+    metadata:
+      labels:
+        app: bookman
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: a12
+      securityContext:
+        # joker:jellyfin owns /data/shared/ebooks; files are world-readable.
+        runAsUser: 1000
+        runAsGroup: 1000
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: bookman
+          image: registry.home/bookman/bookman
+          imagePullPolicy: Always
+          args: ["-config", "/etc/bookman/bookman.toml"]
+          envFrom:
+            # PGHOST, PGPORT, PGDATABASE, PGUSER, PGPASSWORD of the role bookman (README step 1)
+            - secretRef:
+                name: postgres-bookman
+          env:
+            - name: TZ
+              value: Asia/Kolkata
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /api/healthz
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/healthz
+              port: http
+            periodSeconds: 30
+            failureThreshold: 3
+          resources:
+            # PDF covers render in pdfium (WebAssembly), one instance per thumb worker.
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 2Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: library
+              mountPath: /library
+              readOnly: true
+            - name: config
+              mountPath: /etc/bookman
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: library
+          hostPath:
+            path: /data/shared/ebooks
+            type: Directory
+        - name: config
+          configMap:
+            name: bookman-config
+        - name: tmp
+          emptyDir: {}

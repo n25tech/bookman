@@ -1,0 +1,17 @@
+# bookman in the cluster. The database login comes from the postgres-bookman
+# Secret as PGHOST/PGPORT/PGDATABASE/PGUSER/PGPASSWORD, so database_url is empty.
+listen = ":8080"
+database_url = ""
+
+# a12's /data/shared/ebooks is mounted read-only at /library. Comics and D&D are
+# their own libraries; Books is everything else, grouped by top-level folder.
+libraries = [
+  { name = "Books", path = "/library", exclude = ["comics", "dungeons_and_dragons"] },
+  { name = "Comics", path = "/library/comics" },
+  { name = "Dungeons & Dragons", path = "/library/dungeons_and_dragons" },
+]
+
+rescan_interval = "6h"
+watch = true
+thumb_workers = 2
+page_cache_mb = 256
