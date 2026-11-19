@@ -4,9 +4,37 @@
   import { ago } from '../lib/format';
   import type { Note } from '../lib/types';
 
-  let { note, autofocus = false, onjump, ondelete, onchange }: {
-    note: Note; autofocus?: boolean; onjump: (n: Note) => void; ondelete: (n: Note) => void; onchange: (n: Note) => void;
+  let { note, autofocus = false, currentPage, onjump, onpage, ondelete, onchange }: {
+    note: Note; autofocus?: boolean; currentPage: number; onjump: (n: Note) => void; onpage: (page: number) => void;
+    ondelete: (n: Note) => void; onchange: (n: Note) => void;
   } = $props();
+  let textarea = $state<HTMLTextAreaElement>();
+
+  // Insert a link to the page being read at the cursor, e.g. to continue a
+  // book note from another page.
+  function insertPageLink() {
+    const link = `[[p. ${currentPage}]]`;
+    const el = textarea;
+    const start = el?.selectionStart ?? body.length;
+    const end = el?.selectionEnd ?? body.length;
+    const before = body.slice(0, start);
+    const sep = before && !/\s$/.test(before) ? ' ' : '';
+    body = before + sep + link + body.slice(end);
+    onInput();
+    requestAnimationFrame(() => {
+      if (!el) return;
+      el.focus();
+      const pos = start + sep.length + link.length;
+      el.setSelectionRange(pos, pos);
+    });
+  }
+
+  function onPreviewClick(e: MouseEvent) {
+    const a = (e.target as HTMLElement).closest<HTMLAnchorElement>('a[data-page]');
+    if (!a) return;
+    e.preventDefault();
+    onpage(Number(a.dataset.page));
+  }
 
   let editing = $state(autofocus || !note.body_md);
   let body = $state(note.body_md);
@@ -42,7 +70,11 @@
 
 <article class="note" style="--c: var(--hl-{note.color || 'yellow'})">
   <header>
-    <button class="ghost pg" onclick={() => onjump(note)} title="Go to page {note.page}">p. {note.page}</button>
+    {#if note.page === 0}
+      <span class="pg book" title="A note about the whole book">Book</span>
+    {:else}
+      <button class="ghost pg" onclick={() => onjump(note)} title="Go to page {note.page}">p. {note.page}</button>
+    {/if}
     <span class="faint small">{ago(note.updated_at)}</span>
     <span class="spacer"></span>
     {#if saving === 'saving'}<span class="faint small">Saving…</span>{:else if saving === 'saved'}<span class="faint small">Saved</span>{:else if saving === 'error'}<span class="error small">Not saved, retrying</span>{/if}
@@ -54,7 +86,12 @@
     <blockquote onclick={() => onjump(note)}>{note.quote}</blockquote>
   {/if}
   {#if editing}
-    <textarea bind:value={body} oninput={onInput} onblur={save} rows="4" placeholder="Write a note (Markdown)…" use:focusOnMount></textarea>
+    <textarea bind:this={textarea} bind:value={body} oninput={onInput} onblur={save} rows={note.page === 0 ? 6 : 4}
+      placeholder={note.page === 0 ? 'Notes on the whole book (Markdown). Link pages with [[p. 12]].' : 'Write a note (Markdown)…'} use:focusOnMount></textarea>
+    <div class="tools">
+      <button class="ghost small linkbtn" onmousedown={(e) => e.preventDefault()} onclick={insertPageLink} title="Insert a link to the page you're reading">🔗 p. {currentPage}</button>
+      <span class="faint small">[[p. 12]] links a page</span>
+    </div>
     {#if note.quote}
       <div class="colors">
         {#each colors as c}
@@ -64,7 +101,7 @@
     {/if}
   {:else}
     <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-    <div class="md" ondblclick={() => (editing = true)}>
+    <div class="md" ondblclick={() => (editing = true)} onclick={onPreviewClick}>
       {#if body.trim()}{@html renderMarkdown(body)}{:else}<span class="faint">Empty note. Double-click to edit.</span>{/if}
     </div>
   {/if}
@@ -74,6 +111,10 @@
   .note { border: 1px solid var(--border); border-left: 4px solid var(--c); border-radius: 6px; padding: 8px 10px; background: var(--bg-elev); display: flex; flex-direction: column; gap: 6px; }
   header { display: flex; align-items: center; gap: 6px; }
   .pg { padding: 1px 6px; font-weight: 600; font-size: 0.82rem; }
+  .pg.book { border-radius: 4px; background: var(--accent-soft); color: var(--fg); }
+  .tools { display: flex; align-items: center; gap: 8px; }
+  .linkbtn { padding: 2px 8px; }
+  .md :global(a.pagelink) { padding: 0 4px; border-radius: 4px; background: var(--accent-soft); white-space: nowrap; }
   .small { font-size: 0.78rem; }
   .spacer { flex: 1; }
   blockquote { margin: 0; padding: 4px 8px; background: var(--c); border-radius: 4px; font-size: 0.88rem; cursor: pointer; max-height: 8em; overflow: auto; }

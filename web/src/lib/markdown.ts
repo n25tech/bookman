@@ -4,8 +4,14 @@ function esc(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+// Page links: [[p. 42]] / [[42]] / [[page 42]], and [label](#page=42). Rendered as
+// links with data-page; the notes panel turns a click into a jump to that page.
+const pageLink = (page: string, label: string) => `<a href="#page=${page}" data-page="${page}" class="pagelink">${label}</a>`;
+
 function inline(s: string): string {
   return s
+    .replace(/\[\[\s*(?:p\.?|page)?\s*(\d+)\s*\]\]/gi, (_, n) => pageLink(n, `p. ${n}`))
+    .replace(/\[([^\]]+)\]\(#page=(\d+)\)/g, (_, label, n) => pageLink(n, label))
     .replace(/`([^`]+)`/g, '<code>$1</code>')
     .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
     .replace(/(^|[^*])\*([^*]+)\*/g, '$1<em>$2</em>')

@@ -3,20 +3,23 @@
   import type { Book, Note } from '../lib/types';
   import NoteCard from './NoteCard.svelte';
 
-  let { book, notes = $bindable(), currentPage, focusId = $bindable(), onjump, onclose }: {
-    book: Book; notes: Note[]; currentPage: number; focusId: number | null; onjump: (n: Note) => void; onclose: () => void;
+  let { book, notes = $bindable(), currentPage, focusId = $bindable(), onjump, onpage, onclose }: {
+    book: Book; notes: Note[]; currentPage: number; focusId: number | null; onjump: (n: Note) => void;
+    onpage: (page: number) => void; onclose: () => void;
   } = $props();
 
   let tab = $state<'page' | 'all'>('page');
   let undo = $state<{ note: Note; timer: number } | null>(null);
   let error = $state('');
 
-  const visible = $derived(tab === 'page' ? notes.filter((n) => n.page === currentPage) : notes);
+  // Book notes (page 0) are pinned above the page notes on every page.
+  const bookNotes = $derived(notes.filter((n) => n.page === 0));
+  const visible = $derived(tab === 'page' ? notes.filter((n) => n.page === currentPage) : notes.filter((n) => n.page > 0));
 
-  async function addPageNote() {
+  async function addPageNote(page = currentPage) {
     error = '';
     try {
-      const n = await api.createNote(book.id, { page: currentPage, body_md: '' });
+      const n = await api.createNote(book.id, { page, body_md: '' });
       notes = [...notes, n].sort((a, b) => a.page - b.page || (a.anchor_start ?? 0) - (b.anchor_start ?? 0));
       focusId = n.id;
     } catch (e: any) { error = e.message; }
@@ -56,13 +59,25 @@
     <button class="ghost icon" onclick={onclose} title="Hide notes (n)" aria-label="Hide notes">✕</button>
   </div>
   <div class="list">
-    <button class="add" onclick={addPageNote}>+ Note on page {currentPage}</button>
+    <section class="booknotes">
+      <div class="row">
+        <h3>Book notes</h3>
+        <span class="spacer"></span>
+        <button class="ghost small" onclick={() => addPageNote(0)} title="A note about the whole book, shown on every page">+ Book note</button>
+      </div>
+      {#each bookNotes as n (n.id)}
+        <NoteCard note={n} autofocus={focusId === n.id} {currentPage} {onjump} {onpage} ondelete={remove} onchange={changed} />
+      {:else}
+        <p class="faint hint">Thoughts on the whole book, kept on every page. Link to pages with [[p. 12]] or the 🔗 button.</p>
+      {/each}
+    </section>
+    <button class="add" onclick={() => addPageNote()}>+ Note on page {currentPage}</button>
     {#if book.format === 'pdf' && !notes.length}
       <p class="faint hint">Tip: select text in the book to add a highlighted note.</p>
     {/if}
     {#if error}<p class="error">{error}</p>{/if}
     {#each visible as n (n.id)}
-      <NoteCard note={n} autofocus={focusId === n.id} {onjump} ondelete={remove} onchange={changed} />
+      <NoteCard note={n} autofocus={focusId === n.id} {currentPage} {onjump} {onpage} ondelete={remove} onchange={changed} />
     {:else}
       <p class="faint empty">{tab === 'page' ? 'No notes on this page.' : 'No notes in this book yet.'}</p>
     {/each}
@@ -82,6 +97,9 @@
   .small { font-size: 0.85rem; padding: 4px 8px; }
   .list { flex: 1; overflow: auto; padding: 10px; display: flex; flex-direction: column; gap: 10px; }
   .add { justify-content: center; border-style: dashed; color: var(--fg-muted); }
+  .booknotes { display: flex; flex-direction: column; gap: 8px; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
+  .booknotes h3 { margin: 0; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--fg-muted); }
+  .booknotes .hint { text-align: left; margin: 0; }
   .hint, .empty { font-size: 0.88rem; text-align: center; margin: 8px 0; }
   .toast { position: absolute; bottom: 60px; }
 </style>

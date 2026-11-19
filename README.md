@@ -6,7 +6,7 @@ A self-hosted server for PDF and comic libraries: point it at folders of PDFs, C
 - **Formats:** PDF (rendered in the browser with PDF.js; covers and page counts with pdfium compiled to WebAssembly), CBZ and CBR (RAR4 and RAR5, solid or not). A `.cbr` that is really a zip, or the other way round, is detected from its contents.
 - **Reading progress** is saved on every page change, every 2 s while scrolling, and with `sendBeacon` when the tab is hidden or closed. Saves that fail are queued in IndexedDB and retried. The last write wins by client time. If another device is further ahead, the reader offers to jump there.
 - **Browse by folder:** a library opens on its folders exactly as they are on disk (e.g. `computer_science/` shows as "Computer Science"), with breadcrumbs, per-folder counts and covers. "All books" is the flat list; search covers the current folder and everything below it.
-- **Notes** per page, optionally anchored to selected PDF text (shown as highlights). Markdown with preview, autosave, delete with undo, and export as Markdown.
+- **Notes** per page, optionally anchored to selected PDF text (shown as highlights), plus **book notes** about the whole book, pinned on every page. Notes are Markdown with preview and autosave, and can link to pages with `[[p. 42]]` or `[label](#page=42)` (a 🔗 button inserts the current page). Delete with undo; export as Markdown.
 - **The library is read-only.** Users, progress, notes and cover thumbnails live in **PostgreSQL**. Books are identified by a content hash, so moving or renaming a file keeps its progress and notes, and a deleted file is only marked missing.
 
 ## Development
