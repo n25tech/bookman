@@ -106,6 +106,6 @@ WantedBy=multi-user.target
 
 ### Kubernetes (the home cluster)
 
-The manifests and the runbook live in the infrastructure repo: [n25tech/infrastructure `k8s/apps/bookman`](https://github.com/n25tech/infrastructure/tree/master/k8s/apps/bookman). There is one pod pinned to **a12**, with `/data/shared/ebooks` mounted read-only at `/library`. The configuration is a ConfigMap generated from `base/bookman.toml`, the data is in the PostgreSQL database `bookman`, and the image is `ghcr.io/n25tech/bookman:prod`. The UI is at https://bookman.home and https://bookman.k8s.master.home.
+The manifests and the runbook live in the infrastructure repo: [n25tech/infrastructure `k8s/apps/bookman`](https://github.com/n25tech/infrastructure/tree/master/k8s/apps/bookman). There is one pod pinned to **a12**, with `/data/shared/ebooks` mounted read-only at `/library`. The configuration is a ConfigMap generated from `bookman.toml` there, the data is in the PostgreSQL database `bookman`, and the image is `ghcr.io/n25tech/bookman:prod`. The UI is at https://bookman.home and https://bookman.k8s.master.home.
 
 **Deploying a new build:** merge to `master` and wait for CI (`gh run list`). Then run `kubectl -n bookman rollout restart deploy/bookman`: the pod pulls `:prod` when it starts. Config changes, rollbacks and troubleshooting are in that Readme.
