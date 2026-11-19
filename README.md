@@ -93,38 +93,6 @@ WantedBy=multi-user.target
 
 ### Kubernetes (the home cluster)
 
-The manifests are in [deploy/k8s](deploy/k8s): one pod pinned to **a12**, which has the books at `/data/shared/ebooks`. That folder is mounted read-only at `/library`. The configuration is the `bookman-config` ConfigMap, generated from [deploy/k8s/bookman.toml](deploy/k8s/bookman.toml). The data is in the PostgreSQL database `bookman` on `postgres.dbs.svc` ([infrastructure: k8s/dbs/postgres](../infrastructure/k8s/dbs/postgres/Readme.md)). The UI is at `https://bookman.home` (and `https://bookman.k8s.master.home`) through the home-gateway.
+The manifests and the runbook live in the infrastructure repo: [n25tech/infrastructure `k8s/apps/bookman`](https://github.com/n25tech/infrastructure/tree/master/k8s/apps/bookman). There is one pod pinned to **a12**, with `/data/shared/ebooks` mounted read-only at `/library`. The configuration is a ConfigMap generated from `base/bookman.toml`, the data is in the PostgreSQL database `bookman`, and the image is `ghcr.io/n25tech/bookman:prod`. The UI is at https://bookman.home and https://bookman.k8s.master.home.
 
-1. **Database (done once, on a12):** the role and database `bookman`, the `postgres-bookman` Secret in the `bookman` namespace, and a copy of the login in `~/.creds/postgres/bookman`, as in postgres step 3 with `APP=bookman`. (A second database, `bookman_test`, owned by the same role, is for the integration test.)
-2. **Image:** merge to `master` and wait for CI to push `ghcr.io/n25tech/bookman:prod`. **Once, after the first push:** on GitHub, open the `bookman` package (your profile → Packages) → Package settings → Change visibility → **Public**. The nodes then pull it without credentials. (While it is private, pods fail with `ImagePullBackOff` / `401 Unauthorized`.)
-3. **TLS name:** `bookman.k8s.master.home` already matches the edge cert's `*.k8s.master.home`. For `bookman.home`, add `DNS:bookman.home` to the edge cert ([pki step 4](../infrastructure/pki/Readme.md)) and `sudo nerdctl restart edge-envoy` on a12.
-4. **On every machine you browse from:** `echo '192.168.1.11 bookman.home bookman.k8s.master.home' | sudo tee -a /etc/hosts`
-5. **Deploy:**
-
-   ```bash
-   kubectl apply -k deploy/k8s
-   kubectl -n bookman rollout status deploy/bookman
-   kubectl -n bookman logs -f deploy/bookman      # "scan finished ... added=N"
-   ```
-
-**Deploying a new build:** merge to `master`, wait for CI, then
-
-```bash
-kubectl -n bookman rollout restart deploy/bookman
-kubectl -n bookman rollout status deploy/bookman
-```
-
-The pod pulls `:prod` when it starts (`imagePullPolicy: Always`). To pin a build, set `newTag` in `deploy/k8s/kustomization.yaml` to a sha tag and `kubectl apply -k deploy/k8s`. The tags are listed under the package on GitHub.
-
-**Changing the config:** edit `deploy/k8s/bookman.toml` and `kubectl apply -k deploy/k8s`. The ConfigMap name carries a hash, so the pod restarts with the new file.
-
-**Why PostgreSQL rather than RustFS:** progress saves are small, frequent upserts that need a transaction (last write wins by client time, with reading sessions next to them). That is a database job, and the cluster already runs one. Cover thumbnails (~30 KB each) go in the same database, so the pod needs no volume and nothing else to back up.
-
-| Symptom | Fix |
-|---|---|
-| Pod `ImagePullBackOff`, `401 Unauthorized` from ghcr.io | The package is still private: step 2 |
-| Pod `CreateContainerConfigError`: `secret "postgres-bookman" not found` | Step 1 |
-| Log: `postgres not reachable yet` for over a minute | `kubectl -n dbs get pod`; compare the Secret with `~/.creds/postgres/bookman` |
-| Log: `library root: ... no such file or directory` | The hostPath or the `path` in `bookman.toml` is wrong |
-| Browser: `no alternative certificate subject name matches 'bookman.home'` | Step 3, or use `bookman.k8s.master.home` |
-| A book shows "This file couldn't be read" | It's corrupt or encrypted; the error is on its detail page and in the Admin page's last error |
+**Deploying a new build:** merge to `master` and wait for CI (`gh run list`). Then run `kubectl -n bookman rollout restart deploy/bookman`: the pod pulls `:prod` when it starts. Config changes, rollbacks and troubleshooting are in that Readme.
