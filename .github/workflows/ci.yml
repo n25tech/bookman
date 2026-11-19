@@ -2,7 +2,7 @@ name: CI
 
 # GitHub-hosted runners (free for public repos) and GitHub Container Registry
 # (free for public images). Nothing here can reach the home cluster: the cluster
-# pulls ghcr.io/n25tech/bookman itself (deploy/k8s, README "Kubernetes").
+# pulls ghcr.io/n25tech/bookman itself (n25tech/infrastructure k8s/apps/bookman).
 on:
   push:
   # Pull requests from forks; branches of this repo are already tested by their push run.
