@@ -15,8 +15,8 @@ type comicBase struct {
 	pages []string
 }
 
-func (c *comicBase) Pages() []string           { return c.pages }
-func (c *comicBase) PageCount() (int, error)   { return len(c.pages), nil }
+func (c *comicBase) Pages() []string             { return c.pages }
+func (c *comicBase) PageCount() (int, error)     { return len(c.pages), nil }
 func (c *comicBase) Metadata() (Metadata, error) { return Metadata{}, nil }
 
 func pageList(names []string) []string {

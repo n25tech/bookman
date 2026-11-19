@@ -192,11 +192,11 @@ type scanner interface{ Scan(dest ...any) error }
 func scanBook(r scanner) (Book, error) {
 	var b Book
 	var (
-		page             sql.NullInt64
-		offset, percent  sql.NullFloat64
-		finished         sql.NullBool
-		clientTS, upd    sql.NullInt64
-		device           sql.NullString
+		page            sql.NullInt64
+		offset, percent sql.NullFloat64
+		finished        sql.NullBool
+		clientTS, upd   sql.NullInt64
+		device          sql.NullString
 	)
 	err := r.Scan(&b.ID, &b.LibraryID, &b.SeriesID, &b.SeriesName, &b.ContentHash, &b.Path, &b.Format,
 		&b.Title, &b.Author, &b.PageCount, &b.FileSize, &b.Mtime, &b.Status, &b.ErrorMsg, &b.AddedAt, &b.UpdatedAt,
@@ -349,11 +349,11 @@ func (d *DB) MarkMissing(ctx context.Context, ids []int64) error {
 
 // PathIndex is the minimal per-book data the scanner needs to skip unchanged files.
 type PathIndex struct {
-	ID       int64
-	Size     int64
-	Mtime    int64
-	Status   string
-	Path     string
+	ID     int64
+	Size   int64
+	Mtime  int64
+	Status string
+	Path   string
 }
 
 // BooksUnder lists books whose path is below a root folder (any library).

@@ -1,9 +1,11 @@
 package formats
 
 import (
+	"encoding/hex"
 	"sort"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 )
 
 // NaturalLess compares strings so that "page2" < "page10", case-insensitively.
@@ -60,3 +62,29 @@ func TitleFromFilename(name string) string {
 	base = strings.ReplaceAll(base, "_", " ")
 	return strings.TrimFunc(base, unicode.IsSpace)
 }
+
+// Archive entry names are raw bytes: zip tools that predate the UTF-8 flag
+// write CP437 or a local code page, and PostgreSQL text columns only take
+// UTF-8. Such names are stored hex-encoded and decoded before reading.
+const hexPrefix = "hex:"
+
+// EncodeEntryName makes an entry name safe to store as text.
+func EncodeEntryName(name string) string {
+	if utf8.ValidString(name) && !strings.HasPrefix(name, hexPrefix) {
+		return name
+	}
+	return hexPrefix + hex.EncodeToString([]byte(name))
+}
+
+// DecodeEntryName reverses EncodeEntryName.
+func DecodeEntryName(stored string) string {
+	if rest, ok := strings.CutPrefix(stored, hexPrefix); ok {
+		if b, err := hex.DecodeString(rest); err == nil {
+			return string(b)
+		}
+	}
+	return stored
+}
+
+// CleanText replaces invalid UTF-8 (from file names or PDF metadata) so it can be stored.
+func CleanText(s string) string { return strings.ToValidUTF8(s, "�") }

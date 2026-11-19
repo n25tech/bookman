@@ -14,11 +14,11 @@ const SessionGap int64 = 10 * 60 * 1000
 
 // Input is a save from the client.
 type Input struct {
-	Page     int      `json:"page"`
-	Offset   float64  `json:"offset"`
-	ClientTS int64    `json:"client_ts"`
-	Device   string   `json:"device"`
-	Finished *bool    `json:"finished,omitempty"`
+	Page     int     `json:"page"`
+	Offset   float64 `json:"offset"`
+	ClientTS int64   `json:"client_ts"`
+	Device   string  `json:"device"`
+	Finished *bool   `json:"finished,omitempty"`
 }
 
 // Compute returns the row a save would produce and whether it wins over stored.

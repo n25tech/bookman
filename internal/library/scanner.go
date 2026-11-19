@@ -316,6 +316,7 @@ func (s *Scanner) importFile(ctx context.Context, l config.Library, path string)
 		nb.Status, nb.ErrorMsg = "error", err.Error()
 		s.bump(func(st *ScanStatus) { st.Errors++; st.LastError = path + ": " + err.Error() })
 	}
+	nb.Title, nb.Author = formats.CleanText(nb.Title), formats.CleanText(nb.Author)
 	id, err := s.db.InsertBook(ctx, nb)
 	if err != nil {
 		return 0, err
@@ -354,7 +355,9 @@ func readBook(path string, nb *db.NewBook) (err error) {
 		nb.Author = strings.TrimSpace(md.Author)
 	}
 	if c, ok := src.(formats.Comic); ok {
-		nb.Pages = c.Pages()
+		for _, p := range c.Pages() {
+			nb.Pages = append(nb.Pages, formats.EncodeEntryName(p))
+		}
 	}
 	return nil
 }

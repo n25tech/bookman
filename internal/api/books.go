@@ -260,11 +260,12 @@ func (s *Server) page(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	key := func(entry string) string { return b.ContentHash + "\x00" + entry }
-	entry, err := s.DB.ComicPageEntry(r.Context(), b.ID, n-1)
+	stored, err := s.DB.ComicPageEntry(r.Context(), b.ID, n-1)
 	if err != nil {
 		serverError(w, r, err)
 		return
 	}
+	entry := formats.DecodeEntryName(stored)
 	data, ct, hit := s.Pages.Get(key(entry))
 	if !hit {
 		if b.Format == "cbr" {
