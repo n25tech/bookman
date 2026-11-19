@@ -20,10 +20,10 @@ import (
 )
 
 const (
-	cookieName     = "bookman_session"
-	sessionTTL     = 30 * 24 * time.Hour
-	maxJSONBody    = 1 << 20
-	progressBody   = 4 << 10
+	cookieName   = "bookman_session"
+	sessionTTL   = 30 * 24 * time.Hour
+	maxJSONBody  = 1 << 20
+	progressBody = 4 << 10
 )
 
 // Server holds the dependencies of the HTTP handlers.
@@ -155,7 +155,7 @@ type statusWriter struct {
 	status int
 }
 
-func (w *statusWriter) WriteHeader(code int) { w.status = code; w.ResponseWriter.WriteHeader(code) }
+func (w *statusWriter) WriteHeader(code int)        { w.status = code; w.ResponseWriter.WriteHeader(code) }
 func (w *statusWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
 func logRequests(next http.Handler) http.Handler {

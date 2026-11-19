@@ -26,7 +26,8 @@ import (
 )
 
 // The integration test needs an empty PostgreSQL database it may wipe:
-//   BOOKMAN_TEST_DATABASE_URL=postgres://user:pw@localhost:5432/bookman_test go test ./internal/api
+//
+//	BOOKMAN_TEST_DATABASE_URL=postgres://user:pw@localhost:5432/bookman_test go test ./internal/api
 func testDB(t *testing.T) *db.DB {
 	dsn := os.Getenv("BOOKMAN_TEST_DATABASE_URL")
 	if dsn == "" {
@@ -341,7 +342,9 @@ func TestAPI(t *testing.T) {
 	}
 }
 
-func itoa(n int64) string { return strings.TrimSpace(strings.Replace(string(must(json.Marshal(n))), `"`, "", -1)) }
+func itoa(n int64) string {
+	return strings.TrimSpace(strings.Replace(string(must(json.Marshal(n))), `"`, "", -1))
+}
 
 func must(b []byte, err error) []byte {
 	if err != nil {

@@ -4,9 +4,9 @@ package formats
 import (
 	"bytes"
 	"errors"
+	"image"
 	"io"
 	"os"
-	"image"
 	"path/filepath"
 	"strings"
 
@@ -75,7 +75,7 @@ type labeled struct {
 	format string
 }
 
-func (l labeled) Format() string { return l.format }
+func (l labeled) Format() string  { return l.format }
 func (l labeled) Pages() []string { return l.BookSource.(Comic).Pages() }
 
 // sniffArchive returns "rar", "zip" or "" from a file's first bytes.

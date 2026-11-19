@@ -103,7 +103,8 @@ func TestCBZ(t *testing.T) {
 
 // Real files can't be generated for RAR or committed cheaply, so these run
 // against files named in the environment:
-//   BOOKMAN_TEST_CBR=/path/x.cbr BOOKMAN_TEST_PDF=/path/y.pdf go test ./internal/formats
+//
+//	BOOKMAN_TEST_CBR=/path/x.cbr BOOKMAN_TEST_PDF=/path/y.pdf go test ./internal/formats
 func TestRealFiles(t *testing.T) {
 	for _, env := range []string{"BOOKMAN_TEST_CBR", "BOOKMAN_TEST_PDF", "BOOKMAN_TEST_CBZ"} {
 		p := os.Getenv(env)
