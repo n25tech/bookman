@@ -31,3 +31,15 @@ export function duration(ms: number): string {
   if (m < 60) return `${m} min`;
   return `${Math.floor(m / 60)} h ${m % 60} min`;
 }
+
+const SMALL = new Set(['a', 'an', 'and', 'as', 'at', 'by', 'for', 'in', 'of', 'on', 'or', 'the', 'to', 'vs']);
+
+/** "finance_and_accounting" -> "Finance and Accounting". Names with capitals are kept as typed. */
+export function humanize(name: string): string {
+  const spaced = name.replace(/_+/g, ' ').replace(/\s+/g, ' ').trim();
+  if (spaced !== spaced.toLowerCase()) return spaced;
+  return spaced
+    .split(' ')
+    .map((w, i) => (i > 0 && SMALL.has(w) ? w : w.replace(/(^|-)(\p{L})/gu, (_, d, c) => d + c.toUpperCase())))
+    .join(' ');
+}

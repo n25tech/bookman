@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { api } from '../lib/api';
-  import { bytes, dateTime, duration, percent, ago } from '../lib/format';
+  import { bytes, dateTime, duration, percent, ago, humanize } from '../lib/format';
   import { deviceLabel } from '../lib/device';
   import type { Book, Library, ReadingSession } from '../lib/types';
   import Cover from '../components/Cover.svelte';
@@ -40,6 +40,11 @@
     busy = false;
   }
   const p = $derived(book?.progress);
+  // The folders the file is in, for the breadcrumbs.
+  const folders = $derived.by(() => {
+    const parts = (book?.rel_path ?? '').split('/').slice(0, -1);
+    return parts.map((name, i) => ({ name, path: parts.slice(0, i + 1).join('/') }));
+  });
 </script>
 
 <div class="page">
@@ -53,7 +58,9 @@
       <div class="info">
         <p class="crumbs">
           <a href="/library/{book.library_id}">{library?.name}</a>
-          {#if book.series_id && book.series_name !== library?.name}/ <a href="/series/{book.series_id}">{book.series_name}</a>{/if}
+          {#each folders as f (f.path)}
+            / <a href="/library/{book.library_id}?path={encodeURIComponent(f.path)}">{humanize(f.name)}</a>
+          {/each}
         </p>
         <h1>{book.title}</h1>
         {#if book.author}<p class="author">{book.author}</p>{/if}

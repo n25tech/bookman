@@ -1,69 +1,86 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
   import { api } from '../lib/api';
   import { router } from '../lib/router.svelte';
-  import type { Book, Library, Series } from '../lib/types';
+  import { humanize } from '../lib/format';
+  import type { Book, BrowseResult, Library } from '../lib/types';
   import BookCard from '../components/BookCard.svelte';
-  import Cover from '../components/Cover.svelte';
+  import FolderCard from '../components/FolderCard.svelte';
 
   let { id }: { id: number } = $props();
 
-  const q0 = router.query();
-  let view = $state<'books' | 'series'>((q0.get('view') as any) || 'books');
-  let q = $state(q0.get('q') ?? '');
-  let format = $state(q0.get('format') ?? '');
-  let status = $state(q0.get('status') ?? '');
-  let sort = $state(q0.get('sort') ?? 'title');
+  // URL state: ?path=a/b for the folder, ?view=all for the flat list, plus filters.
+  const query = $derived(router.query());
+  const view = $derived<'folders' | 'all'>(query.get('view') === 'all' ? 'all' : 'folders');
+  const path = $derived(query.get('path') ?? '');
+
+  let q = $state(router.query().get('q') ?? '');
+  let format = $state(router.query().get('format') ?? '');
+  let status = $state(router.query().get('status') ?? '');
+  let sort = $state(router.query().get('sort') ?? 'title');
 
   let library = $state<Library | null>(null);
-  let books = $state<Book[]>([]);
-  let series = $state<Series[]>([]);
+  let browse = $state<BrowseResult | null>(null);
+  let books = $state<Book[]>([]); // flat list: "All books", or search results
   let total = $state(0);
   let loading = $state(true);
   let error = $state('');
-  let shown = $state(120); // render in chunks: big comic libraries have thousands of books
+  let shown = $state(120);
   let sentinel = $state<HTMLElement>();
+
+  const searching = $derived(view === 'all' || q.trim() !== '' || format !== '' || status !== '');
+
+  function href(next: { path?: string; view?: string }): string {
+    const p = new URLSearchParams();
+    const v = next.view ?? view;
+    if (v === 'all') p.set('view', 'all');
+    const np = next.path ?? path;
+    if (v !== 'all' && np) p.set('path', np);
+    const s = p.toString();
+    return `/library/${id}${s ? '?' + s : ''}`;
+  }
 
   let seq = 0;
   async function load() {
     const mine = ++seq;
     loading = true;
     error = '';
-    const params: Record<string, string> = { sort };
-    if (q) params.q = q;
-    if (format) params.format = format;
-    if (status) params.status = status;
-    const url = new URLSearchParams({ ...params, ...(view === 'series' ? { view } : {}) });
-    history.replaceState(null, '', `/library/${id}?${url}`);
     try {
-      if (view === 'series') {
-        const s = await api.librarySeries(id);
-        if (mine !== seq) return;
-        series = s;
-        if (!library) library = (await api.libraryBooks(id, { limit: '1' })).library;
-      } else {
+      if (searching) {
+        const params: Record<string, string> = { sort };
+        if (q.trim()) params.q = q.trim();
+        if (format) params.format = format;
+        if (status) params.status = status;
         const r = await api.libraryBooks(id, params);
         if (mine !== seq) return;
         library = r.library;
-        books = r.books;
-        total = r.total;
+        // In the folder view, a search covers the current folder and everything below it.
+        const prefix = view === 'folders' && path ? path + '/' : '';
+        books = prefix ? r.books.filter((b) => b.rel_path.startsWith(prefix)) : r.books;
+        total = books.length;
         shown = 120;
       }
+      if (view === 'folders') {
+        const r = await api.browse(id, path);
+        if (mine !== seq) return;
+        browse = r;
+        library = r.library;
+      }
     } catch (e: any) {
-      error = e.message;
+      if (mine === seq) error = e.message;
     }
-    loading = false;
+    if (mine === seq) loading = false;
   }
 
+  // Reload when the folder or view in the URL changes (links, back/forward).
+  $effect(() => { view; path; load(); });
+
   let debounce: number | undefined;
-  function onSearch() {
+  function onFilter() {
     clearTimeout(debounce);
     debounce = window.setTimeout(load, 250);
   }
+  function clearFilters() { q = ''; format = ''; status = ''; load(); }
 
-  onMount(load);
-
-  // Render more covers as the end of the grid comes into view.
   $effect(() => {
     if (!sentinel) return;
     const io = new IntersectionObserver((entries) => {
@@ -73,79 +90,92 @@
     return () => io.disconnect();
   });
 
-  const filtered = $derived(view === 'series' && q ? series.filter((s) => s.name.toLowerCase().includes(q.toLowerCase())) : series);
+  const title = $derived(view === 'folders' && path ? humanize(path.split('/').pop()!) : library?.name ?? 'Library');
 </script>
 
 <div class="page">
   <div class="head">
-    <h1>{library?.name ?? 'Library'}</h1>
+    <div class="titles">
+      {#if view === 'folders' && browse && browse.breadcrumbs.length}
+        <nav class="crumbs" aria-label="Folder">
+          <a href={href({ path: '' })}>{library?.name}</a>
+          {#each browse.breadcrumbs.slice(0, -1) as c (c.path)}
+            <span class="sep">/</span><a href={href({ path: c.path })}>{humanize(c.name)}</a>
+          {/each}
+        </nav>
+      {/if}
+      <h1>{title}</h1>
+    </div>
     <div class="seg" role="tablist">
-      <button role="tab" class:on={view === 'books'} aria-selected={view === 'books'} onclick={() => { view = 'books'; load(); }}>Books</button>
-      <button role="tab" class:on={view === 'series'} aria-selected={view === 'series'} onclick={() => { view = 'series'; load(); }}>Series</button>
+      <a role="tab" class:on={view === 'folders'} aria-selected={view === 'folders'} href={href({ view: 'folders', path: '' })}>Folders</a>
+      <a role="tab" class:on={view === 'all'} aria-selected={view === 'all'} href={href({ view: 'all' })}>All books</a>
     </div>
   </div>
 
   <div class="filters row">
-    <input type="search" placeholder="Search title or author" bind:value={q} oninput={onSearch} aria-label="Search" />
-    {#if view === 'books'}
-      <select bind:value={format} onchange={load} aria-label="Format">
-        <option value="">All formats</option><option value="pdf">PDF</option><option value="cbz">CBZ</option><option value="cbr">CBR</option>
-      </select>
-      <select bind:value={status} onchange={load} aria-label="Status">
-        <option value="">Any status</option><option value="unread">Unread</option><option value="reading">Reading</option><option value="finished">Finished</option>
-      </select>
+    <input type="search" placeholder={view === 'folders' && path ? `Search in ${title}` : 'Search title or author'} bind:value={q} oninput={onFilter} aria-label="Search" />
+    <select bind:value={format} onchange={load} aria-label="Format">
+      <option value="">All formats</option><option value="pdf">PDF</option><option value="cbz">CBZ</option><option value="cbr">CBR</option>
+    </select>
+    <select bind:value={status} onchange={load} aria-label="Status">
+      <option value="">Any status</option><option value="unread">Unread</option><option value="reading">Reading</option><option value="finished">Finished</option>
+    </select>
+    {#if searching}
       <select bind:value={sort} onchange={load} aria-label="Sort">
         <option value="title">Title</option><option value="added">Recently added</option><option value="last_read">Last read</option>
       </select>
       <span class="faint">{total} {total === 1 ? 'book' : 'books'}</span>
+      {#if view === 'folders'}<button class="ghost" onclick={clearFilters}>Clear</button>{/if}
     {/if}
   </div>
 
   {#if error}
     <div class="empty"><h2>Couldn't load the library</h2><p>{error}</p><button onclick={load}>Retry</button></div>
-  {:else if loading && !books.length && !series.length}
+  {:else if loading && !browse && !books.length}
     <div class="empty">Loading…</div>
-  {:else if view === 'books'}
+  {:else if searching}
     {#if books.length === 0}
       <div class="empty">
         {#if q || format || status}<h2>No matches</h2><p>Try a different search or filter.</p>
         {:else}<h2>No books yet</h2><p>Books show up here once the scan finds them.</p>{/if}
       </div>
     {:else}
-      <div class="grid">
-        {#each books.slice(0, shown) as b (b.id)}<BookCard book={b} />{/each}
-      </div>
+      <div class="grid">{#each books.slice(0, shown) as b (b.id)}<BookCard book={b} />{/each}</div>
       {#if shown < books.length}<div bind:this={sentinel} class="more faint">Loading more…</div>{/if}
     {/if}
-  {:else}
-    {#if filtered.length === 0}
-      <div class="empty"><h2>No series</h2></div>
+  {:else if browse}
+    {#if browse.folders.length === 0 && browse.books.length === 0}
+      <div class="empty"><h2>No books yet</h2><p>Books show up here once the scan finds them.</p></div>
     {:else}
-      <div class="grid">
-        {#each filtered as s (s.id)}
-          <a class="series" href="/series/{s.id}">
-            <Cover bookId={s.cover_book_id ?? 0} etag={s.cover_etag} title={s.name} format="series" />
-            <div class="title">{s.name}</div>
-            <div class="faint small">{s.book_count} {s.book_count === 1 ? 'book' : 'books'}</div>
-          </a>
-        {/each}
-      </div>
+      {#if browse.folders.length}
+        <section>
+          {#if browse.books.length}<h2>Folders</h2>{/if}
+          <div class="grid">
+            {#each browse.folders as f (f.path)}<FolderCard folder={f} href={href({ path: f.path })} />{/each}
+          </div>
+        </section>
+      {/if}
+      {#if browse.books.length}
+        <section>
+          {#if browse.folders.length}<h2>Books</h2>{/if}
+          <div class="grid">{#each browse.books as b (b.id)}<BookCard book={b} />{/each}</div>
+        </section>
+      {/if}
     {/if}
   {/if}
 </div>
 
 <style>
-  .head { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 12px; }
-  .head h1 { margin: 0; }
+  .head { display: flex; align-items: flex-end; gap: 16px; flex-wrap: wrap; margin-bottom: 12px; }
+  .titles { min-width: 0; flex: 1; }
+  .head h1 { margin: 0; overflow-wrap: anywhere; }
+  .crumbs { font-size: 0.9rem; color: var(--fg-muted); margin-bottom: 2px; display: flex; flex-wrap: wrap; gap: 4px; }
+  .sep { color: var(--fg-faint); }
   .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 7px; overflow: hidden; }
-  .seg button { border: 0; border-radius: 0; background: transparent; color: var(--fg-muted); }
-  .seg button.on { background: var(--accent-soft); color: var(--fg); }
+  .seg a { padding: 6px 12px; color: var(--fg-muted); }
+  .seg a:hover { text-decoration: none; color: var(--fg); }
+  .seg a.on { background: var(--accent-soft); color: var(--fg); }
   .filters { margin-bottom: 20px; }
   .filters input[type='search'] { flex: 1 1 220px; max-width: 360px; }
   .more { text-align: center; padding: 24px; }
-  .series { color: inherit; display: block; min-width: 0; }
-  .series:hover { text-decoration: none; }
-  .series:hover .title { color: var(--accent); }
-  .title { margin-top: 8px; font-size: 0.88rem; font-weight: 550; line-height: 1.3; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; }
-  .small { font-size: 0.78rem; }
 </style>

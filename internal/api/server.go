@@ -61,6 +61,7 @@ func (s *Server) Handler() http.Handler {
 	auth("GET /api/libraries", s.libraries)
 	auth("GET /api/libraries/{id}/books", s.libraryBooks)
 	auth("GET /api/libraries/{id}/series", s.librarySeries)
+	auth("GET /api/libraries/{id}/browse", s.browse)
 	auth("GET /api/series/{id}", s.series)
 	auth("GET /api/books/{id}", s.book)
 	auth("GET /api/books/{id}/cover", s.cover)

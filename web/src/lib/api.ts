@@ -1,4 +1,4 @@
-import type { Book, Library, Note, Progress, ReadingSession, Series, User } from './types';
+import type { Book, BrowseResult, Library, Note, Progress, ReadingSession, Series, User } from './types';
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) { super(message); }
@@ -40,6 +40,8 @@ export const api = {
   libraries: () => request<Library[]>('GET', '/libraries'),
   libraryBooks: (id: number, params: Record<string, string>) =>
     request<{ library: Library; total: number; books: Book[] }>('GET', `/libraries/${id}/books?` + new URLSearchParams(params)),
+  browse: (id: number, path: string) =>
+    request<BrowseResult>('GET', `/libraries/${id}/browse?` + new URLSearchParams({ path })),
   librarySeries: (id: number) => request<Series[]>('GET', `/libraries/${id}/series`),
   series: (id: number) => request<{ series: Series; library: Library; books: Book[] }>('GET', `/series/${id}`),
   book: (id: number) => request<{ book: Book; library: Library; note_count: number }>('GET', `/books/${id}`),

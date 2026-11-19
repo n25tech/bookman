@@ -175,6 +175,32 @@ func TestAPI(t *testing.T) {
 	if len(libs) != 1 || libs[0].BookCount != 3 {
 		t.Fatalf("libraries %+v", libs)
 	}
+	// The folder browser mirrors the layout on disk.
+	var br struct {
+		Folders []Folder
+		Books   []db.Book
+	}
+	c.do("GET", "/api/libraries/"+itoa(libs[0].ID)+"/browse", nil, &br)
+	var seriesA *Folder
+	for i, f := range br.Folders {
+		if f.Name == "Excluded" {
+			t.Fatal("an excluded folder is listed")
+		}
+		if f.Name == "Series A" {
+			seriesA = &br.Folders[i]
+		}
+	}
+	if seriesA == nil || seriesA.BookCount != 2 || seriesA.Path != "Series A" || len(br.Books) != 0 {
+		t.Fatalf("browse root: %+v", br)
+	}
+	c.do("GET", "/api/libraries/"+itoa(libs[0].ID)+"/browse?path=Series%20A", nil, &br)
+	if len(br.Folders) != 0 || len(br.Books) != 2 || br.Books[0].Title != "Issue 2" {
+		t.Fatalf("browse Series A: %+v", br)
+	}
+	if code := c.do("GET", "/api/libraries/"+itoa(libs[0].ID)+"/browse?path=../../etc", nil, nil); code != 404 {
+		t.Fatalf("browse outside the library: %d", code)
+	}
+
 	var series []db.Series
 	c.do("GET", "/api/libraries/"+itoa(libs[0].ID)+"/series", nil, &series)
 	if len(series) != 2 || series[1].Name != "Series A" {
