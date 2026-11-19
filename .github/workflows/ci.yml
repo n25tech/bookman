@@ -14,9 +14,8 @@ permissions:
 
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}
-  # a newer push replaces an older run on branches; on the default branch every merge
-  # finishes building
-  cancel-in-progress: ${{ github.ref_name != github.event.repository.default_branch }}
+  # a newer push replaces an older run on branches; on master every merge finishes building
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
 
 jobs:
   test:
@@ -76,8 +75,8 @@ jobs:
           retention-days: 7
 
   image:
-    # Images for the default branch only (merges); branches only run the tests.
-    if: github.event_name == 'push' && github.ref_name == github.event.repository.default_branch
+    # Images for master only (merges); branches only run the tests.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     needs: test
     runs-on: ubuntu-latest
     permissions:

@@ -37,7 +37,7 @@ BOOKMAN_E2E_URL=http://localhost:8080 BOOKMAN_E2E_USER=admin BOOKMAN_E2E_PASSWOR
 [.github/workflows/ci.yml](.github/workflows/ci.yml) runs on GitHub-hosted runners, which are free for public repositories:
 
 - **Every push, and pull requests from forks:** `make build`, then `make test` with a PostgreSQL service container (so the API integration test runs). Then the Playwright tests run against a fresh server holding the fixture book.
-- **Merges to `main`:** after the tests pass, it builds the `Dockerfile` and pushes `ghcr.io/n25tech/bookman:<12-char sha>` and `:prod` to GitHub Container Registry. It logs in with the workflow's own `GITHUB_TOKEN`, so no secret needs setting up.
+- **Merges to `master`:** after the tests pass, it builds the `Dockerfile` and pushes `ghcr.io/n25tech/bookman:<12-char sha>` and `:prod` to GitHub Container Registry. It logs in with the workflow's own `GITHUB_TOKEN`, so no secret needs setting up.
 
 No self-hosted runner is involved, so code from a fork never runs on the home cluster, and the cluster only ever pulls the public image.
 
@@ -96,7 +96,7 @@ WantedBy=multi-user.target
 The manifests are in [deploy/k8s](deploy/k8s): one pod pinned to **a12**, which has the books at `/data/shared/ebooks`. That folder is mounted read-only at `/library`. The configuration is the `bookman-config` ConfigMap, generated from [deploy/k8s/bookman.toml](deploy/k8s/bookman.toml). The data is in the PostgreSQL database `bookman` on `postgres.dbs.svc` ([infrastructure: k8s/dbs/postgres](../infrastructure/k8s/dbs/postgres/Readme.md)). The UI is at `https://bookman.home` (and `https://bookman.k8s.master.home`) through the home-gateway.
 
 1. **Database (done once, on a12):** the role and database `bookman`, the `postgres-bookman` Secret in the `bookman` namespace, and a copy of the login in `~/.creds/postgres/bookman`, as in postgres step 3 with `APP=bookman`. (A second database, `bookman_test`, owned by the same role, is for the integration test.)
-2. **Image:** merge to `main` and wait for CI to push `ghcr.io/n25tech/bookman:prod`. **Once, after the first push:** on GitHub, open the `bookman` package (your profile → Packages) → Package settings → Change visibility → **Public**. The nodes then pull it without credentials. (While it is private, pods fail with `ImagePullBackOff` / `401 Unauthorized`.)
+2. **Image:** merge to `master` and wait for CI to push `ghcr.io/n25tech/bookman:prod`. **Once, after the first push:** on GitHub, open the `bookman` package (your profile → Packages) → Package settings → Change visibility → **Public**. The nodes then pull it without credentials. (While it is private, pods fail with `ImagePullBackOff` / `401 Unauthorized`.)
 3. **TLS name:** `bookman.k8s.master.home` already matches the edge cert's `*.k8s.master.home`. For `bookman.home`, add `DNS:bookman.home` to the edge cert ([pki step 4](../infrastructure/pki/Readme.md)) and `sudo nerdctl restart edge-envoy` on a12.
 4. **On every machine you browse from:** `echo '192.168.1.11 bookman.home bookman.k8s.master.home' | sudo tee -a /etc/hosts`
 5. **Deploy:**
@@ -107,7 +107,7 @@ The manifests are in [deploy/k8s](deploy/k8s): one pod pinned to **a12**, which 
    kubectl -n bookman logs -f deploy/bookman      # "scan finished ... added=N"
    ```
 
-**Deploying a new build:** merge to `main`, wait for CI, then
+**Deploying a new build:** merge to `master`, wait for CI, then
 
 ```bash
 kubectl -n bookman rollout restart deploy/bookman
