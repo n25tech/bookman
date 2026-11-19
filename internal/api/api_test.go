@@ -132,8 +132,8 @@ func TestAPI(t *testing.T) {
 	writeCP437CBZ(t, filepath.Join(root, "Old", "cp437.cbz"))
 
 	covers := thumbs.New(d, 1)
-	sc := library.NewScanner(d, []config.Library{{Name: "Comics", Path: root, Exclude: []string{"Excluded"}}}, covers)
-	if err := sc.Init(ctx); err != nil {
+	sc := library.NewScanner(d, covers)
+	if err := sc.Init(ctx, []config.Library{{Name: "Comics", Path: root, Exclude: []string{"Excluded"}}}); err != nil {
 		t.Fatal(err)
 	}
 	sc.ScanAll(ctx)
@@ -145,7 +145,8 @@ func TestAPI(t *testing.T) {
 	go covers.Run(cctx)
 
 	srv := &Server{DB: d, Scanner: sc, Thumbs: covers, Pages: formats.NewPageCache(1 << 20),
-		Web: fstest.MapFS{"index.html": {Data: []byte("<html>app</html>")}}, ScanAll: func() { sc.ScanAll(ctx) }}
+		Web: fstest.MapFS{"index.html": {Data: []byte("<html>app</html>")}}, ScanAll: func() { sc.ScanAll(ctx) },
+		ScanLibrary: func(id int64) { sc.ScanLibrary(ctx, id) }, MediaRoots: []string{filepath.Dir(root)}}
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 	jar, _ := cookiejar.New(nil)
@@ -372,6 +373,89 @@ func TestAPI(t *testing.T) {
 	var e map[string]string
 	if code := c.do("GET", "/api/nope", nil, &e); code != 404 || e["error"] == "" {
 		t.Fatalf("api 404: %d %v", code, e)
+	}
+
+	// Libraries are managed from the admin UI.
+	media := filepath.Dir(root)
+	more := filepath.Join(media, "more")
+	writeCBZ(t, filepath.Join(more, "area", "x.cbz"), 2)
+	var fsr struct {
+		Dirs []fsEntry
+	}
+	c.do("GET", "/api/admin/fs", nil, &fsr)
+	if len(fsr.Dirs) != 1 || fsr.Dirs[0].Path != media {
+		t.Fatalf("fs roots: %+v", fsr)
+	}
+	c.do("GET", "/api/admin/fs?path="+media, nil, &fsr)
+	names := map[string]string{}
+	for _, e := range fsr.Dirs {
+		names[e.Name] = e.Library
+	}
+	if lib, ok := names[filepath.Base(root)]; !ok || lib != "Comics" {
+		t.Fatalf("fs listing should mark the Comics folder: %+v", fsr.Dirs)
+	}
+	if _, ok := names["more"]; !ok {
+		t.Fatalf("fs listing misses the new folder: %+v", fsr.Dirs)
+	}
+	if code := c.do("GET", "/api/admin/fs?path=/etc", nil, nil); code != 403 {
+		t.Fatalf("fs outside the media roots: %d", code)
+	}
+	if code := c.do("POST", "/api/admin/libraries", map[string]any{"name": "Etc", "path": "/etc"}, nil); code != 400 {
+		t.Fatalf("library outside the media roots: %d", code)
+	}
+	var created adminLibrary
+	if code := c.do("POST", "/api/admin/libraries", map[string]any{"name": "More", "path": more}, &created); code != 201 {
+		t.Fatalf("add library: %d", code)
+	}
+	if code := c.do("POST", "/api/admin/libraries", map[string]any{"name": "Again", "path": more + "/"}, nil); code != 409 {
+		t.Fatalf("duplicate folder: %d", code)
+	}
+	// The new library is scanned right away.
+	waitBooks := func(name string, want int) {
+		t.Helper()
+		deadline := time.Now().Add(10 * time.Second)
+		for {
+			var ls []db.Library
+			c.do("GET", "/api/libraries", nil, &ls)
+			for _, l := range ls {
+				if l.Name == name && l.BookCount == want {
+					return
+				}
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("library %q never reached %d books: %+v", name, want, ls)
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
+	waitBooks("More", 1)
+	if code := c.do("PATCH", "/api/admin/libraries/"+itoa(created.ID), map[string]any{"name": "More books", "path": more, "exclude": []string{"area"}}, nil); code != 200 {
+		t.Fatalf("edit library: %d", code)
+	}
+	waitBooks("More books", 0) // the only book is in the now-skipped folder
+	if code := c.do("DELETE", "/api/admin/libraries/"+itoa(created.ID), nil, nil); code != 200 {
+		t.Fatalf("remove library: %d", code)
+	}
+	var ls []db.Library
+	c.do("GET", "/api/libraries", nil, &ls)
+	if len(ls) != 1 {
+		t.Fatalf("removed library still listed: %+v", ls)
+	}
+	// Adding the folder again revives the same library (and its books' progress and notes).
+	var again adminLibrary
+	if code := c.do("POST", "/api/admin/libraries", map[string]any{"name": "More", "path": more}, &again); code != 201 || again.ID != created.ID {
+		t.Fatalf("re-add: %d id %d, want %d", code, again.ID, created.ID)
+	}
+	waitBooks("More", 1)
+	// The config file only seeds libraries once.
+	if err := sc.Init(ctx, []config.Library{{Name: "Seeded", Path: more}}); err != nil {
+		t.Fatal(err)
+	}
+	c.do("GET", "/api/libraries", nil, &ls)
+	for _, l := range ls {
+		if l.Name == "Seeded" {
+			t.Fatal("config libraries were applied again")
+		}
 	}
 
 	// Logout ends the session.

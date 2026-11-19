@@ -3,12 +3,11 @@
   import { api } from '../lib/api';
   import { router } from '../lib/router.svelte';
   import { session } from '../lib/session.svelte';
-  import type { Library } from '../lib/types';
+  import { libraries, refreshLibraries } from '../lib/libraries.svelte';
   import ThemeToggle from './ThemeToggle.svelte';
 
-  let libraries = $state<Library[]>([]);
   let menuOpen = $state(false);
-  onMount(async () => { try { libraries = await api.libraries(); } catch {} });
+  onMount(() => { refreshLibraries().catch(() => {}); });
 
   async function logout() {
     await api.logout().catch(() => {});
@@ -22,7 +21,7 @@
     <img src="/favicon.svg" alt="" width="22" height="22" /> Bookman
   </a>
   <nav class:open={menuOpen}>
-    {#each libraries as l (l.id)}
+    {#each libraries.list as l (l.id)}
       <a href="/library/{l.id}" class:active={router.path === `/library/${l.id}`} onclick={() => (menuOpen = false)}>{l.name}</a>
     {/each}
   </nav>

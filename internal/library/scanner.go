@@ -21,20 +21,24 @@ import (
 // CoverQueue receives books that need a thumbnail.
 type CoverQueue interface{ Enqueue(bookID int64) }
 
-// Scanner imports books from the library folders into the database.
+// Scanner imports books from the library folders into the database. The
+// libraries live in the database (managed from the admin UI); Reload picks up
+// changes and tells the watcher.
 type Scanner struct {
-	db     *db.DB
-	libs   []config.Library
-	ids    map[string]int64 // library root -> id
-	covers CoverQueue
-	mu     sync.Mutex // one scan at a time
-	status ScanStatus
-	stMu   sync.Mutex
+	db      *db.DB
+	covers  CoverQueue
+	mu      sync.Mutex // one scan at a time
+	libMu   sync.RWMutex
+	libs    []db.Library
+	changed chan struct{}
+	status  ScanStatus
+	stMu    sync.Mutex
 }
 
 // ScanStatus is shown to admins.
 type ScanStatus struct {
 	Running    bool   `json:"running"`
+	Library    string `json:"library,omitempty"` // set when one library is scanned
 	StartedAt  int64  `json:"started_at"`
 	FinishedAt int64  `json:"finished_at"`
 	Seen       int    `json:"seen"`
@@ -45,36 +49,74 @@ type ScanStatus struct {
 	LastError  string `json:"last_error,omitempty"`
 }
 
-func NewScanner(d *db.DB, libs []config.Library, covers CoverQueue) *Scanner {
-	return &Scanner{db: d, libs: libs, ids: map[string]int64{}, covers: covers}
+func NewScanner(d *db.DB, covers CoverQueue) *Scanner {
+	return &Scanner{db: d, covers: covers, changed: make(chan struct{}, 1)}
 }
 
-// Init records the configured libraries in the database.
-func (s *Scanner) Init(ctx context.Context) error {
-	for _, l := range s.libs {
-		id, err := s.db.UpsertLibrary(ctx, l.Name, l.Path)
-		if err != nil {
+// Init seeds the libraries from the config file on first start, then loads them.
+func (s *Scanner) Init(ctx context.Context, seed []config.Library) error {
+	done, err := s.db.Setting(ctx, "libraries_seeded")
+	if err != nil {
+		return err
+	}
+	if done == "" {
+		for _, l := range seed {
+			if err := s.db.SeedLibrary(ctx, l.Name, l.Path, l.Exclude); err != nil {
+				return err
+			}
+			slog.Info("library added from the config file", "name", l.Name, "path", l.Path)
+		}
+		if err := s.db.SetSetting(ctx, "libraries_seeded", "1"); err != nil {
 			return err
 		}
-		s.ids[l.Path] = id
+	} else if len(seed) > 0 {
+		slog.Info("libraries are managed in the admin UI; the config file's list is only used on first start")
+	}
+	return s.Reload(ctx)
+}
+
+// Reload reads the libraries from the database and restarts the watcher on them.
+func (s *Scanner) Reload(ctx context.Context) error {
+	libs, err := s.db.Libraries(ctx)
+	if err != nil {
+		return err
+	}
+	for i := range libs {
+		libs[i].RootPath = filepath.Clean(libs[i].RootPath)
+	}
+	s.libMu.Lock()
+	s.libs = libs
+	s.libMu.Unlock()
+	select {
+	case s.changed <- struct{}{}:
+	default:
 	}
 	return nil
 }
 
-// Roots returns the configured library roots.
+// Libraries returns the current libraries.
+func (s *Scanner) Libraries() []db.Library {
+	s.libMu.RLock()
+	defer s.libMu.RUnlock()
+	return append([]db.Library(nil), s.libs...)
+}
+
+// Roots returns the library folders.
 func (s *Scanner) Roots() []string {
-	out := make([]string, len(s.libs))
-	for i, l := range s.libs {
-		out[i] = l.Path
+	libs := s.Libraries()
+	out := make([]string, len(libs))
+	for i, l := range libs {
+		out[i] = l.RootPath
 	}
 	return out
 }
 
-// LibraryIDs returns the database ids of the configured libraries.
+// LibraryIDs returns the ids of the current libraries.
 func (s *Scanner) LibraryIDs() []int64 {
-	out := make([]int64, 0, len(s.ids))
-	for _, id := range s.ids {
-		out = append(out, id)
+	libs := s.Libraries()
+	out := make([]int64, len(libs))
+	for i, l := range libs {
+		out[i] = l.ID
 	}
 	return out
 }
@@ -93,25 +135,25 @@ func (s *Scanner) bump(f func(*ScanStatus)) {
 
 // libraryFor returns the library a path belongs to: the deepest root that
 // contains it, unless the path is inside one of that library's excludes.
-func (s *Scanner) libraryFor(path string) (config.Library, bool) {
-	var best config.Library
+func (s *Scanner) libraryFor(path string) (db.Library, bool) {
+	var best db.Library
 	found := false
-	for _, l := range s.libs {
-		rel, err := filepath.Rel(l.Path, path)
+	for _, l := range s.Libraries() {
+		rel, err := filepath.Rel(l.RootPath, path)
 		if err != nil || rel == ".." || strings.HasPrefix(rel, "../") {
 			continue
 		}
 		if excluded(l, rel) {
 			continue
 		}
-		if !found || len(l.Path) > len(best.Path) {
+		if !found || len(l.RootPath) > len(best.RootPath) {
 			best, found = l, true
 		}
 	}
 	return best, found
 }
 
-func excluded(l config.Library, rel string) bool {
+func excluded(l db.Library, rel string) bool {
 	for _, e := range l.Exclude {
 		if rel == e || strings.HasPrefix(rel, e+"/") {
 			return true
@@ -124,33 +166,48 @@ func hidden(name string) bool { return strings.HasPrefix(name, ".") }
 
 // ScanAll scans every library. It returns when the scan is done.
 func (s *Scanner) ScanAll(ctx context.Context) {
+	s.scan(ctx, s.Libraries(), "")
+}
+
+// ScanLibrary scans one library.
+func (s *Scanner) ScanLibrary(ctx context.Context, id int64) error {
+	for _, l := range s.Libraries() {
+		if l.ID == id {
+			s.scan(ctx, []db.Library{l}, l.Name)
+			return nil
+		}
+	}
+	return db.ErrNotFound
+}
+
+func (s *Scanner) scan(ctx context.Context, libs []db.Library, label string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.bump(func(st *ScanStatus) { *st = ScanStatus{Running: true, StartedAt: db.Now()} })
+	s.bump(func(st *ScanStatus) { *st = ScanStatus{Running: true, Library: label, StartedAt: db.Now()} })
 	start := time.Now()
-	for _, l := range s.libs {
+	for _, l := range libs {
 		if err := s.scanLibrary(ctx, l); err != nil {
 			slog.Error("scan failed", "library", l.Name, "err", err)
-			s.bump(func(st *ScanStatus) { st.Errors++; st.LastError = err.Error() })
+			s.bump(func(st *ScanStatus) { st.Errors++; st.LastError = l.Name + ": " + err.Error() })
 		}
 	}
 	s.bump(func(st *ScanStatus) { st.Running = false; st.FinishedAt = db.Now() })
 	st := s.Status()
-	slog.Info("scan finished", "took", time.Since(start).Round(time.Millisecond), "seen", st.Seen,
+	slog.Info("scan finished", "library", label, "took", time.Since(start).Round(time.Millisecond), "seen", st.Seen,
 		"added", st.Added, "moved", st.Moved, "missing", st.Missing, "errors", st.Errors)
 }
 
-func (s *Scanner) scanLibrary(ctx context.Context, l config.Library) error {
-	if _, err := os.Stat(l.Path); err != nil {
+func (s *Scanner) scanLibrary(ctx context.Context, l db.Library) error {
+	if _, err := os.Stat(l.RootPath); err != nil {
 		return fmt.Errorf("library root: %w", err)
 	}
-	known, err := s.db.BooksUnder(ctx, l.Path)
+	known, err := s.db.BooksUnder(ctx, l.RootPath)
 	if err != nil {
 		return err
 	}
 	seen := map[string]bool{}
 	seenIDs := map[int64]bool{} // books found in this walk, under whatever path
-	err = filepath.WalkDir(l.Path, func(path string, d fs.DirEntry, err error) error {
+	err = filepath.WalkDir(l.RootPath, func(path string, d fs.DirEntry, err error) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
@@ -161,15 +218,15 @@ func (s *Scanner) scanLibrary(ctx context.Context, l config.Library) error {
 			}
 			return nil
 		}
-		if path != l.Path && hidden(d.Name()) {
+		if path != l.RootPath && hidden(d.Name()) {
 			if d.IsDir() {
 				return fs.SkipDir
 			}
 			return nil
 		}
-		rel, _ := filepath.Rel(l.Path, path)
+		rel, _ := filepath.Rel(l.RootPath, path)
 		if d.IsDir() {
-			if path != l.Path && excluded(l, rel) {
+			if path != l.RootPath && excluded(l, rel) {
 				return fs.SkipDir
 			}
 			return nil
@@ -178,7 +235,7 @@ func (s *Scanner) scanLibrary(ctx context.Context, l config.Library) error {
 			return nil
 		}
 		// Another, deeper library owns this path.
-		if owner, ok := s.libraryFor(path); !ok || owner.Path != l.Path {
+		if owner, ok := s.libraryFor(path); !ok || owner.RootPath != l.RootPath {
 			return nil
 		}
 		seen[path] = true
@@ -210,7 +267,7 @@ func (s *Scanner) scanLibrary(ctx context.Context, l config.Library) error {
 		if seen[path] || seenIDs[k.ID] || k.Status == "missing" {
 			continue
 		}
-		if owner, ok := s.libraryFor(path); ok && owner.Path != l.Path {
+		if owner, ok := s.libraryFor(path); ok && owner.RootPath != l.RootPath {
 			continue // belongs to a nested library, which scans it
 		}
 		gone = append(gone, k.ID)
@@ -253,9 +310,9 @@ func (s *Scanner) RemovedPath(ctx context.Context, path string) error {
 	return s.db.MarkMissing(ctx, ids)
 }
 
-func (s *Scanner) seriesFor(ctx context.Context, l config.Library, path string) (int64, error) {
+func (s *Scanner) seriesFor(ctx context.Context, l db.Library, path string) (int64, error) {
 	dir := filepath.Dir(path)
-	rel, err := filepath.Rel(l.Path, dir)
+	rel, err := filepath.Rel(l.RootPath, dir)
 	if err != nil {
 		return 0, err
 	}
@@ -263,11 +320,11 @@ func (s *Scanner) seriesFor(ctx context.Context, l config.Library, path string) 
 	if rel == "." {
 		name = l.Name
 	}
-	return s.db.UpsertSeries(ctx, s.ids[l.Path], name, rel)
+	return s.db.UpsertSeries(ctx, l.ID, name, rel)
 }
 
 // importFile adds or updates the book at path and returns its id (0 if it was skipped).
-func (s *Scanner) importFile(ctx context.Context, l config.Library, path string) (int64, error) {
+func (s *Scanner) importFile(ctx context.Context, l db.Library, path string) (int64, error) {
 	info, err := os.Stat(path)
 	if err != nil {
 		return 0, err
@@ -280,7 +337,7 @@ func (s *Scanner) importFile(ctx context.Context, l config.Library, path string)
 	if err != nil {
 		return 0, err
 	}
-	libID := s.ids[l.Path]
+	libID := l.ID
 	mtime := info.ModTime().UnixMilli()
 
 	existing, err := s.db.BookByHash(ctx, hash)

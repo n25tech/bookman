@@ -30,9 +30,15 @@ libraries = [{ name = "Books", path = "/media/books/", exclude = ["comics/"] }]
 		t.Fatalf("paths not cleaned: %+v", cfg.Libraries)
 	}
 
-	env := map[string]string{"BOOKMAN_LISTEN": ":1", "BOOKMAN_LIBRARIES": "A=/a; B=/b", "BOOKMAN_THUMB_WORKERS": "5"}
+	if len(cfg.MediaRoots) != 1 || cfg.MediaRoots[0] != "/" {
+		t.Fatalf("default media roots %v", cfg.MediaRoots)
+	}
+	env := map[string]string{"BOOKMAN_MEDIA_ROOTS": "/media; /srv/books/", "BOOKMAN_LISTEN": ":1", "BOOKMAN_LIBRARIES": "A=/a; B=/b", "BOOKMAN_THUMB_WORKERS": "5"}
 	if err := applyEnv(&cfg, func(k string) (string, bool) { v, ok := env[k]; return v, ok }); err != nil {
 		t.Fatal(err)
+	}
+	if len(cfg.MediaRoots) != 2 || cfg.MediaRoots[1] != "/srv/books/" {
+		t.Fatalf("media roots from env %v", cfg.MediaRoots)
 	}
 	if cfg.Listen != ":1" || len(cfg.Libraries) != 2 || cfg.Libraries[1].Path != "/b" || cfg.ThumbWorkers != 5 {
 		t.Fatalf("env not applied: %+v", cfg)

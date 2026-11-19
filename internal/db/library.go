@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 )
 
 // ErrNotFound is returned when a row does not exist.
@@ -17,11 +18,16 @@ func notFound(err error) error {
 }
 
 type Library struct {
-	ID        int64  `json:"id"`
-	Name      string `json:"name"`
-	RootPath  string `json:"-"`
-	BookCount int    `json:"book_count"`
+	ID        int64    `json:"id"`
+	Name      string   `json:"name"`
+	RootPath  string   `json:"-"`
+	Exclude   []string `json:"-"`
+	BookCount int      `json:"book_count"`
+	RemovedAt *int64   `json:"-"`
 }
+
+// ErrConflict is returned when a library folder is already in use.
+var ErrConflict = errors.New("conflict")
 
 type Series struct {
 	ID        int64  `json:"id"`
@@ -57,30 +63,26 @@ type Book struct {
 	Progress    *Progress `json:"progress"`
 }
 
-// UpsertLibrary makes sure a configured library exists and returns its id.
-func (d *DB) UpsertLibrary(ctx context.Context, name, root string) (int64, error) {
-	var id int64
-	err := d.QueryRowContext(ctx, `
-		INSERT INTO libraries (name, root_path) VALUES ($1, $2)
-		ON CONFLICT (root_path) DO UPDATE SET name = EXCLUDED.name
-		RETURNING id`, name, root).Scan(&id)
-	return id, err
+const libraryColumns = `l.id, l.name, l.root_path, l.exclude, l.removed_at,
+	(SELECT count(*) FROM books b WHERE b.library_id = l.id AND b.status <> 'missing')`
+
+func scanLibrary(r scanner) (Library, error) {
+	var l Library
+	err := r.Scan(&l.ID, &l.Name, &l.RootPath, &l.Exclude, &l.RemovedAt, &l.BookCount)
+	return l, err
 }
 
-// Libraries lists libraries whose root is in roots (the configured ones).
-func (d *DB) Libraries(ctx context.Context, roots []string) ([]Library, error) {
-	rows, err := d.QueryContext(ctx, `
-		SELECT l.id, l.name, l.root_path,
-		       (SELECT count(*) FROM books b WHERE b.library_id = l.id AND b.status <> 'missing')
-		FROM libraries l WHERE l.root_path = ANY($1) ORDER BY l.name`, roots)
+// Libraries lists the libraries that have not been removed.
+func (d *DB) Libraries(ctx context.Context) ([]Library, error) {
+	rows, err := d.QueryContext(ctx, `SELECT `+libraryColumns+` FROM libraries l WHERE l.removed_at IS NULL ORDER BY l.name, l.id`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []Library
+	out := []Library{}
 	for rows.Next() {
-		var l Library
-		if err := rows.Scan(&l.ID, &l.Name, &l.RootPath, &l.BookCount); err != nil {
+		l, err := scanLibrary(rows)
+		if err != nil {
 			return nil, err
 		}
 		out = append(out, l)
@@ -88,10 +90,86 @@ func (d *DB) Libraries(ctx context.Context, roots []string) ([]Library, error) {
 	return out, rows.Err()
 }
 
+// Library loads one library, removed or not.
 func (d *DB) Library(ctx context.Context, id int64) (Library, error) {
-	var l Library
-	err := d.QueryRowContext(ctx, `SELECT id, name, root_path FROM libraries WHERE id = $1`, id).Scan(&l.ID, &l.Name, &l.RootPath)
+	l, err := scanLibrary(d.QueryRowContext(ctx, `SELECT `+libraryColumns+` FROM libraries l WHERE l.id = $1`, id))
 	return l, notFound(err)
+}
+
+func clean(exclude []string) []string {
+	if exclude == nil {
+		return []string{}
+	}
+	return exclude
+}
+
+// AddLibrary creates a library, or revives a removed one with the same folder.
+// It returns ErrConflict if an active library already uses the folder.
+func (d *DB) AddLibrary(ctx context.Context, name, root string, exclude []string) (int64, error) {
+	var id int64
+	err := d.QueryRowContext(ctx, `
+		INSERT INTO libraries (name, root_path, exclude) VALUES ($1, $2, $3)
+		ON CONFLICT (root_path) DO UPDATE SET name = EXCLUDED.name, exclude = EXCLUDED.exclude, removed_at = NULL
+		WHERE libraries.removed_at IS NOT NULL
+		RETURNING id`, name, root, clean(exclude)).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, ErrConflict
+	}
+	return id, err
+}
+
+// UpdateLibrary changes a library's name, folder and skipped sub-folders.
+func (d *DB) UpdateLibrary(ctx context.Context, id int64, name, root string, exclude []string) error {
+	res, err := d.ExecContext(ctx, `UPDATE libraries SET name = $2, root_path = $3, exclude = $4 WHERE id = $1 AND removed_at IS NULL`,
+		id, name, root, clean(exclude))
+	if err != nil {
+		if strings.Contains(err.Error(), "23505") { // unique_violation on root_path
+			return ErrConflict
+		}
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// RemoveLibrary hides a library; its books, progress and notes are kept.
+func (d *DB) RemoveLibrary(ctx context.Context, id int64) error {
+	res, err := d.ExecContext(ctx, `UPDATE libraries SET removed_at = $2 WHERE id = $1 AND removed_at IS NULL`, id, Now())
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// SeedLibrary records a library from the config file (first start only):
+// an existing row with the same folder gets the configured name and excludes.
+func (d *DB) SeedLibrary(ctx context.Context, name, root string, exclude []string) error {
+	_, err := d.ExecContext(ctx, `
+		INSERT INTO libraries (name, root_path, exclude) VALUES ($1, $2, $3)
+		ON CONFLICT (root_path) DO UPDATE SET name = EXCLUDED.name, exclude = EXCLUDED.exclude, removed_at = NULL`,
+		name, root, clean(exclude))
+	return err
+}
+
+// Setting reads a value from the settings table ("" if unset).
+func (d *DB) Setting(ctx context.Context, key string) (string, error) {
+	var v string
+	err := d.QueryRowContext(ctx, `SELECT value FROM settings WHERE key = $1`, key).Scan(&v)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return v, err
+}
+
+func (d *DB) SetSetting(ctx context.Context, key, value string) error {
+	_, err := d.ExecContext(ctx, `INSERT INTO settings (key, value) VALUES ($1, $2)
+		ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, key, value)
+	return err
 }
 
 // UpsertSeries returns the id of the series for a folder, creating it if needed.

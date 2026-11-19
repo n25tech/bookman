@@ -2,8 +2,10 @@
   import { onMount } from 'svelte';
   import { api } from '../lib/api';
   import { humanize } from '../lib/format';
+  import { refreshLibraries } from '../lib/libraries.svelte';
   import type { Book, Folder, Library } from '../lib/types';
   import BookCard from '../components/BookCard.svelte';
+  import { session } from '../lib/session.svelte';
 
   let continueReading = $state<Book[]>([]);
   let recent = $state<Book[]>([]);
@@ -14,7 +16,7 @@
 
   onMount(async () => {
     try {
-      [continueReading, recent, libraries] = await Promise.all([api.continueReading(), api.recentlyAdded(), api.libraries()]);
+      [continueReading, recent, libraries] = await Promise.all([api.continueReading(), api.recentlyAdded(), refreshLibraries()]);
       // Top-level folders of each library, as shortcuts.
       for (const l of libraries) {
         api.browse(l.id, '').then((r) => { folders[l.id] = r.folders; }).catch(() => {});
@@ -33,8 +35,13 @@
     <div class="empty"><h2>Something went wrong</h2><p>{error}</p></div>
   {:else if libraries.length === 0}
     <div class="empty">
-      <h2>No libraries configured</h2>
-      <p>Add library folders to <code>bookman.toml</code> (the <code>libraries</code> list) and restart the server.</p>
+      <h2>No libraries yet</h2>
+      {#if session.user?.is_admin}
+        <p>Add a folder of books to get started.</p>
+        <a class="btn primary" href="/admin">Add a library</a>
+      {:else}
+        <p>Ask an admin to add a library.</p>
+      {/if}
     </div>
   {:else}
     {#if continueReading.length}

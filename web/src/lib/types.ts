@@ -27,3 +27,6 @@ export interface Folder {
 export interface BrowseResult {
   library: Library; path: string; breadcrumbs: { name: string; path: string }[]; folders: Folder[]; books: Book[];
 }
+export interface AdminLibrary { id: number; name: string; path: string; exclude: string[]; book_count: number; exists: boolean }
+export interface FsEntry { name: string; path: string; library?: string }
+export interface FsListing { path: string; parent: string | null; dirs: FsEntry[]; books_here?: number; library?: string }

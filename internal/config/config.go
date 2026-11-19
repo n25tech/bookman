@@ -27,11 +27,16 @@ type Config struct {
 	Listen string `toml:"listen"`
 	// DatabaseURL is a PostgreSQL connection string. When empty, the standard
 	// libpq variables (PGHOST, PGPORT, PGDATABASE, PGUSER, PGPASSWORD) are used.
-	DatabaseURL    string    `toml:"database_url"`
-	Libraries      []Library `toml:"libraries"`
-	RescanInterval Duration  `toml:"rescan_interval"`
-	ThumbWorkers   int       `toml:"thumb_workers"`
-	PageCacheMB    int       `toml:"page_cache_mb"`
+	DatabaseURL string `toml:"database_url"`
+	// Libraries seeds the library list on first start. After that, libraries
+	// are managed in the admin UI (and stored in the database).
+	Libraries []Library `toml:"libraries"`
+	// MediaRoots are the folders the admin UI may browse and add libraries from.
+	// Default: "/".
+	MediaRoots     []string `toml:"media_roots"`
+	RescanInterval Duration `toml:"rescan_interval"`
+	ThumbWorkers   int      `toml:"thumb_workers"`
+	PageCacheMB    int      `toml:"page_cache_mb"`
 	// Watch enables fsnotify watching of the library folders.
 	Watch bool `toml:"watch"`
 }
@@ -108,6 +113,14 @@ func applyEnv(cfg *Config, lookup func(string) (string, bool)) error {
 		}
 		cfg.Watch = b
 	}
+	if v, ok := lookup("BOOKMAN_MEDIA_ROOTS"); ok {
+		cfg.MediaRoots = nil
+		for _, p := range strings.Split(v, ";") {
+			if p = strings.TrimSpace(p); p != "" {
+				cfg.MediaRoots = append(cfg.MediaRoots, p)
+			}
+		}
+	}
 	// BOOKMAN_LIBRARIES="Books=/media/books;Comics=/media/comics" replaces the list.
 	if v, ok := lookup("BOOKMAN_LIBRARIES"); ok {
 		cfg.Libraries = nil
@@ -132,6 +145,15 @@ func (c *Config) validate() error {
 	}
 	if c.PageCacheMB < 0 {
 		c.PageCacheMB = 0
+	}
+	if len(c.MediaRoots) == 0 {
+		c.MediaRoots = []string{"/"}
+	}
+	for i, r := range c.MediaRoots {
+		if !filepath.IsAbs(r) {
+			return fmt.Errorf("media root %q must be an absolute path", r)
+		}
+		c.MediaRoots[i] = filepath.Clean(r)
 	}
 	seen := map[string]bool{}
 	for i := range c.Libraries {

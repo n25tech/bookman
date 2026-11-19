@@ -55,10 +55,13 @@ jobs:
           BOOKMAN_E2E_PASSWORD: e2e-password
         run: |
           psql "$BOOKMAN_TEST_DATABASE_URL" -c 'DROP SCHEMA public CASCADE; CREATE SCHEMA public;'
-          mkdir -p "$RUNNER_TEMP/library/Books"
+          mkdir -p "$RUNNER_TEMP/library/Books" "$RUNNER_TEMP/library/Extra"
           cp web/e2e/fixtures/test-book.pdf "$RUNNER_TEMP/library/Books/"
+          # A folder that isn't a library yet, for the add-a-library test.
+          python3 web/e2e/fixtures/make-test-pdf.py "$RUNNER_TEMP/library/Extra/extra-book.pdf" 5
           BOOKMAN_LISTEN=127.0.0.1:18080 BOOKMAN_DATABASE_URL="$BOOKMAN_TEST_DATABASE_URL" \
-            BOOKMAN_LIBRARIES="Books=$RUNNER_TEMP/library/Books" ./bin/bookman > "$RUNNER_TEMP/server.log" 2>&1 &
+            BOOKMAN_MEDIA_ROOTS="$RUNNER_TEMP/library" BOOKMAN_LIBRARIES="Books=$RUNNER_TEMP/library/Books" \
+            ./bin/bookman > "$RUNNER_TEMP/server.log" 2>&1 &
           for i in $(seq 60); do curl -sf "$BOOKMAN_E2E_URL/api/healthz" >/dev/null && break; sleep 1; done
           curl -sf -X POST -H 'Content-Type: application/json' -H "Origin: $BOOKMAN_E2E_URL" \
             -d "{\"username\":\"$BOOKMAN_E2E_USER\",\"password\":\"$BOOKMAN_E2E_PASSWORD\"}" "$BOOKMAN_E2E_URL/api/auth/setup" >/dev/null

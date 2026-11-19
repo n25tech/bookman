@@ -50,13 +50,25 @@ No self-hosted runner is involved, so code from a fork never runs on the home cl
 |---|---|---|---|
 | `listen` | `BOOKMAN_LISTEN` | `:8080` | |
 | `database_url` | `BOOKMAN_DATABASE_URL` | empty | Empty uses `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD` |
-| `libraries` | `BOOKMAN_LIBRARIES` (`Name=/path;Name2=/path2`) | none | `{ name, path, exclude = [...] }`. Nested libraries are fine: a book belongs to the deepest library containing it |
+| `libraries` | `BOOKMAN_LIBRARIES` (`Name=/path;Name2=/path2`) | none | **Only used on first start**, to seed the libraries: `{ name, path, exclude = [...] }`. After that, manage them in **Admin → Libraries** |
+| `media_roots` | `BOOKMAN_MEDIA_ROOTS` (`/a;/b`) | `/` | The folders the admin UI may browse and add libraries from |
 | `rescan_interval` | `BOOKMAN_RESCAN_INTERVAL` | `6h` | Full rescan as a safety net next to the watcher |
 | `watch` | `BOOKMAN_WATCH` | `true` | inotify watching of the library folders |
 | `thumb_workers` | `BOOKMAN_THUMB_WORKERS` | CPUs/2 | Cover workers, and pdfium instances |
 | `page_cache_mb` | `BOOKMAN_PAGE_CACHE_MB` | `128` | In-memory cache of extracted comic pages |
 
 On first start with an empty database the UI asks you to create the admin account. Admins add more users and can start a scan from the Admin page.
+
+### Libraries
+
+Libraries are managed in **Admin → Libraries**, like Jellyfin, and stored in the database:
+
+- **Add library:** pick a folder with the folder browser (limited to `media_roots`), give it a name, and optionally list sub-folders to skip. It is scanned and watched at once; no restart.
+- **Scan / Edit / Remove** each library. Editing the folder or the skipped sub-folders rescans it.
+- **Removing** a library hides its books but keeps their reading progress and notes; adding the same folder again brings everything back. Files on disk are never touched.
+- **Nested libraries are fine:** a book belongs to the deepest library containing it, so a `comics/` library inside a `Books` library takes its own books.
+
+The `libraries` list in the config file only seeds the database on the first start (the existing libraries, with their skip lists, are kept). After that it is ignored, and the log says so.
 
 ## Deployment
 

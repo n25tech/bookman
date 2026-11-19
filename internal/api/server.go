@@ -33,8 +33,11 @@ type Server struct {
 	Thumbs  *thumbs.Worker
 	Pages   *formats.PageCache
 	Web     fs.FS // built frontend (web/dist)
-	// ScanAll is run in the background by POST /api/admin/scan.
-	ScanAll func()
+	// ScanAll and ScanLibrary run scans in the background (admin endpoints).
+	ScanAll     func()
+	ScanLibrary func(id int64)
+	// MediaRoots are the folders the admin UI may add libraries from.
+	MediaRoots []string
 }
 
 type ctxKey struct{}
@@ -82,6 +85,12 @@ func (s *Server) Handler() http.Handler {
 	auth("GET /api/recently-added", s.recentlyAdded)
 	admin("POST /api/admin/scan", s.adminScan)
 	admin("GET /api/admin/scan", s.adminScanStatus)
+	admin("GET /api/admin/libraries", s.adminLibraries)
+	admin("POST /api/admin/libraries", s.adminCreateLibrary)
+	admin("PATCH /api/admin/libraries/{id}", s.adminUpdateLibrary)
+	admin("DELETE /api/admin/libraries/{id}", s.adminRemoveLibrary)
+	admin("POST /api/admin/libraries/{id}/scan", s.adminScanLibrary)
+	admin("GET /api/admin/fs", s.adminFS)
 	admin("GET /api/admin/users", s.adminUsers)
 	admin("POST /api/admin/users", s.adminCreateUser)
 	api.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { writeError(w, 404, "no such endpoint") })

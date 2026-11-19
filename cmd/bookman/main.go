@@ -62,11 +62,7 @@ func run(configPath string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	libs := make([]string, len(cfg.Libraries))
-	for i, l := range cfg.Libraries {
-		libs[i] = l.Name + "=" + l.Path
-	}
-	slog.Info("starting bookman", "version", version, "listen", cfg.Listen, "libraries", strings.Join(libs, ", "))
+	slog.Info("starting bookman", "version", version, "listen", cfg.Listen, "media_roots", strings.Join(cfg.MediaRoots, ", "))
 
 	database, err := db.Open(ctx, cfg.DatabaseURL)
 	if err != nil {
@@ -74,15 +70,14 @@ func run(configPath string) error {
 	}
 	defer database.Close()
 
-	roots := make([]string, len(cfg.Libraries))
-	for i, l := range cfg.Libraries {
-		roots[i] = l.Path
-	}
-	formats.SetupPDF(cfg.ThumbWorkers, roots)
+	formats.SetupPDF(cfg.ThumbWorkers)
 	covers := thumbs.New(database, cfg.ThumbWorkers)
-	scanner := library.NewScanner(database, cfg.Libraries, covers)
-	if err := scanner.Init(ctx); err != nil {
-		return fmt.Errorf("registering libraries: %w", err)
+	scanner := library.NewScanner(database, covers)
+	if err := scanner.Init(ctx, cfg.Libraries); err != nil {
+		return fmt.Errorf("loading libraries: %w", err)
+	}
+	for _, l := range scanner.Libraries() {
+		slog.Info("library", "name", l.Name, "path", l.RootPath, "skip", strings.Join(l.Exclude, ", "))
 	}
 
 	scanAll := func() {
@@ -97,6 +92,12 @@ func run(configPath string) error {
 		Pages:   formats.NewPageCache(cfg.PageCacheMB << 20),
 		Web:     web.Dist(),
 		ScanAll: scanAll,
+		ScanLibrary: func(id int64) {
+			if err := scanner.ScanLibrary(ctx, id); err == nil {
+				covers.EnqueueMissing(ctx)
+			}
+		},
+		MediaRoots: cfg.MediaRoots,
 	}
 	httpSrv := &http.Server{
 		Addr:              cfg.Listen,

@@ -111,7 +111,7 @@ func TestRealFiles(t *testing.T) {
 		if p == "" {
 			continue
 		}
-		SetupPDF(1, []string{filepath.Dir(p)})
+		SetupPDF(1)
 		t.Run(env, func(t *testing.T) {
 			start := time.Now()
 			src, err := Open(p)

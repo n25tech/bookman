@@ -12,15 +12,37 @@ import (
 	"github.com/fsnotify/fsnotify"
 )
 
-// Watch follows changes under the library roots until ctx is done. Events are
-// debounced per path, so a file being copied is imported once it settles.
+// Watch follows changes under the library folders until ctx is done, and
+// starts over on the new folders whenever the libraries change (Reload).
 func (s *Scanner) Watch(ctx context.Context) error {
+	for {
+		wctx, cancel := context.WithCancel(ctx)
+		errc := make(chan error, 1)
+		go func() { errc <- s.watchRoots(wctx, s.Roots()) }()
+		select {
+		case <-ctx.Done():
+			cancel()
+			<-errc
+			return nil
+		case <-s.changed:
+			cancel()
+			<-errc
+		case err := <-errc:
+			cancel()
+			return err
+		}
+	}
+}
+
+// watchRoots watches the given folders until ctx is done. Events are debounced
+// per path, so a file being copied is imported once it settles.
+func (s *Scanner) watchRoots(ctx context.Context, roots []string) error {
 	w, err := fsnotify.NewWatcher()
 	if err != nil {
 		return err
 	}
 	defer w.Close()
-	for _, root := range s.Roots() {
+	for _, root := range roots {
 		addTree(w, root)
 	}
 
