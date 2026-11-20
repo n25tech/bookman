@@ -185,6 +185,49 @@ func (s *Server) book(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"book": b, "library": lib, "note_count": notes})
 }
 
+const maxMetadataLen = 500
+
+// updateBook edits the title and author (admin only). Only the database changes;
+// the file is left alone so its content hash, and the progress tied to it, stay put.
+func (s *Server) updateBook(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r, "id")
+	if !ok {
+		return
+	}
+	var in struct {
+		Title  *string `json:"title"`
+		Author *string `json:"author"`
+	}
+	if !readJSON(w, r, maxJSONBody, &in) {
+		return
+	}
+	b, err := s.DB.Book(r.Context(), userFrom(r).ID, id)
+	if err != nil {
+		serverError(w, r, err)
+		return
+	}
+	title, author := b.Title, b.Author
+	if in.Title != nil {
+		title = strings.Join(strings.Fields(formats.CleanText(*in.Title)), " ")
+	}
+	if in.Author != nil {
+		author = strings.Join(strings.Fields(formats.CleanText(*in.Author)), " ")
+	}
+	if title == "" {
+		writeError(w, http.StatusBadRequest, "title is required")
+		return
+	}
+	if len(title) > maxMetadataLen || len(author) > maxMetadataLen {
+		writeError(w, http.StatusBadRequest, "title and author must be at most 500 bytes")
+		return
+	}
+	if err := s.DB.UpdateBookMetadata(r.Context(), id, title, author); err != nil {
+		serverError(w, r, err)
+		return
+	}
+	s.book(w, r)
+}
+
 func (s *Server) cover(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r, "id")
 	if !ok {

@@ -83,6 +83,7 @@ func (s *Server) Handler() http.Handler {
 	auth("DELETE /api/notes/{id}", s.deleteNote)
 	auth("GET /api/continue-reading", s.continueReading)
 	auth("GET /api/recently-added", s.recentlyAdded)
+	admin("PATCH /api/books/{id}", s.updateBook)
 	admin("POST /api/admin/scan", s.adminScan)
 	admin("GET /api/admin/scan", s.adminScanStatus)
 	admin("GET /api/admin/libraries", s.adminLibraries)
