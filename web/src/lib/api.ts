@@ -45,6 +45,8 @@ export const api = {
   librarySeries: (id: number) => request<Series[]>('GET', `/libraries/${id}/series`),
   series: (id: number) => request<{ series: Series; library: Library; books: Book[] }>('GET', `/series/${id}`),
   book: (id: number) => request<{ book: Book; library: Library; note_count: number }>('GET', `/books/${id}`),
+  updateBook: (id: number, m: { title: string; author: string }) =>
+    request<{ book: Book; library: Library; note_count: number }>('PATCH', `/books/${id}`, m),
   continueReading: () => request<Book[]>('GET', '/continue-reading'),
   recentlyAdded: () => request<Book[]>('GET', '/recently-added'),
 
