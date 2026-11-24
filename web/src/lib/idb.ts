@@ -1,19 +1,33 @@
 // The browser database shared by the offline queues (progress and notes).
 const DB_NAME = 'bookman';
-export const PROGRESS_STORE = 'pending-progress';
+// Queued progress, one entry per user and book (key "<user id>:<book id>").
+export const PROGRESS_STORE = 'pending-progress-v2';
+// Version 1–2 store, keyed by book only; its entries move to PROGRESS_STORE.
+const OLD_PROGRESS_STORE = 'pending-progress';
 export const NOTES_STORE = 'pending-notes';
 
 function openDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, 2);
+    const req = indexedDB.open(DB_NAME, 3);
     req.onupgradeneeded = () => {
       const db = req.result;
-      if (!db.objectStoreNames.contains(PROGRESS_STORE)) db.createObjectStore(PROGRESS_STORE, { keyPath: 'bookId' });
       if (!db.objectStoreNames.contains(NOTES_STORE)) db.createObjectStore(NOTES_STORE, { keyPath: 'key' });
+      if (!db.objectStoreNames.contains(PROGRESS_STORE)) {
+        const store = db.createObjectStore(PROGRESS_STORE, { keyPath: 'key' });
+        // Entries queued before progress was tied to a user: nobody knows whose
+        // they are, so they keep the old behaviour (sent by whoever signs in).
+        if (db.objectStoreNames.contains(OLD_PROGRESS_STORE)) {
+          const old = req.transaction!.objectStore(OLD_PROGRESS_STORE).getAll();
+          old.onsuccess = () => {
+            for (const p of old.result) store.put({ ...p, key: `legacy:${p.bookId}`, userId: null });
+            db.deleteObjectStore(OLD_PROGRESS_STORE);
+          };
+        }
+      }
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
-    // Another tab still has version 1 open; it closes it on versionchange below.
+    // Another tab still has an older version open; it closes it on versionchange below.
     req.onblocked = () => console.warn('bookman database upgrade waiting for other tabs');
   });
 }
