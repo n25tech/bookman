@@ -3,6 +3,7 @@
   import { api } from '../lib/api';
   import { bytes, dateTime, duration, percent, ago, humanize } from '../lib/format';
   import { deviceLabel } from '../lib/device';
+  import { clearLocalPosition } from '../lib/progress';
   import type { Book, Library, ReadingSession } from '../lib/types';
   import Cover from '../components/Cover.svelte';
   import { isSaved, offline, removeBook, saveBook } from '../lib/offline.svelte';
@@ -49,7 +50,7 @@
     try {
       await api.resetProgress(id);
       book.progress = null;
-      try { localStorage.removeItem(`bookman:pos:${id}`); } catch {}
+      clearLocalPosition(id);
     } catch (e: any) { alert(e.message); }
     busy = false;
   }

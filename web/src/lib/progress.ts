@@ -1,38 +1,49 @@
 // Reading-progress sync: saves on page change, debounced saves while scrolling,
 // a sendBeacon flush when the page is hidden, and an IndexedDB queue (latest
 // position per book only) for saves that failed, retried with backoff.
+//
+// Queued saves belong to the user who made them and are only sent while that
+// user is signed in, so someone else signing in on this browser never gets them.
 import { deviceId } from './device';
 import { idb as idbStore, PROGRESS_STORE } from './idb';
+import { session } from './session.svelte';
 import type { Progress } from './types';
 
 const idb = <T>(mode: IDBTransactionMode, f: (s: IDBObjectStore) => IDBRequest<T>) => idbStore<T>(PROGRESS_STORE, mode, f);
 
 export interface Position { page: number; offset: number }
-interface Pending { bookId: number; body: SaveBody }
+// userId null: queued before entries had an owner (sent by whoever is signed in).
+interface Pending { key: string; userId: number | null; bookId: number; body: SaveBody }
+
+const me = () => session.user?.id ?? null;
+const keyFor = (bookId: number, userId = me()) => `${userId}:${bookId}`;
 interface SaveBody { page: number; offset: number; client_ts: number; device: string }
 
-async function queuePut(p: Pending) {
+async function queuePut(userId: number | null, bookId: number, body: SaveBody) {
+  if (userId === null) return; // signed out: nobody to send it for
+  const p: Pending = { key: keyFor(bookId, userId), userId, bookId, body };
   try {
-    const existing = await idb<Pending | undefined>('readonly', (s) => s.get(p.bookId));
+    const existing = await idb<Pending | undefined>('readonly', (s) => s.get(p.key));
     if (existing && existing.body.client_ts >= p.body.client_ts) return;
     await idb('readwrite', (s) => s.put(p));
   } catch (e) { console.warn('progress queue unavailable', e); }
 }
 
-async function queueDelete(bookId: number, upTo: number) {
+async function queueDelete(key: string, upTo: number) {
   try {
-    const existing = await idb<Pending | undefined>('readonly', (s) => s.get(bookId));
-    if (existing && existing.body.client_ts <= upTo) await idb('readwrite', (s) => s.delete(bookId));
+    const existing = await idb<Pending | undefined>('readonly', (s) => s.get(key));
+    if (existing && existing.body.client_ts <= upTo) await idb('readwrite', (s) => s.delete(key));
   } catch {}
 }
 
 async function queueAll(): Promise<Pending[]> {
-  try { return await idb<Pending[]>('readwrite', (s) => s.getAll()); } catch { return []; }
+  try { return await idb<Pending[]>('readonly', (s) => s.getAll()); } catch { return []; }
 }
 
-/** The latest queued (unsent) position for a book, if any. */
+/** The signed-in user's latest queued (unsent) position for a book, if any. */
 export async function pendingFor(bookId: number): Promise<SaveBody | null> {
-  try { return (await idb<Pending | undefined>('readonly', (s) => s.get(bookId)))?.body ?? null; } catch { return null; }
+  if (me() === null) return null;
+  try { return (await idb<Pending | undefined>('readonly', (s) => s.get(keyFor(bookId))))?.body ?? null; } catch { return null; }
 }
 
 async function send(bookId: number, body: SaveBody): Promise<Progress> {
@@ -55,21 +66,23 @@ let flushing = false;
 let retryTimer: number | undefined;
 let retryDelay = 2000;
 
-/** Send everything in the queue. Retries with exponential backoff on failure. */
+/** Send the signed-in user's queue. Retries with exponential backoff on failure. */
 export async function flushQueue(): Promise<void> {
-  if (flushing) return;
+  const userId = me();
+  if (flushing || userId === null) return;
   flushing = true;
   clearTimeout(retryTimer);
   let failed = false;
   try {
     for (const p of await queueAll()) {
+      if (p.userId !== userId && p.userId !== null) continue; // someone else's: wait for them
       try {
         await send(p.bookId, p.body);
-        await queueDelete(p.bookId, p.body.client_ts);
+        await queueDelete(p.key, p.body.client_ts);
       } catch (e: any) {
         // 4xx other than auth/timeouts will never succeed: drop it.
         if (e?.status && e.status >= 400 && e.status < 500 && e.status !== 401 && e.status !== 408 && e.status !== 429) {
-          await queueDelete(p.bookId, p.body.client_ts);
+          await queueDelete(p.key, p.body.client_ts);
         } else failed = true;
       }
     }
@@ -84,7 +97,12 @@ export async function flushQueue(): Promise<void> {
 
 // This device's last position per book, so "jump to the other device" is only
 // offered when the server is ahead of what this device last read.
-const LOCAL_KEY = (id: number) => `bookman:pos:${id}`;
+// Per user too, so a second person on this browser doesn't open at the first one's page.
+const LOCAL_KEY = (id: number) => `bookman:pos:${me()}:${id}`;
+
+export function clearLocalPosition(bookId: number) {
+  try { localStorage.removeItem(LOCAL_KEY(bookId)); } catch {}
+}
 
 export function localPosition(bookId: number): (Position & { ts: number }) | null {
   try {
@@ -104,6 +122,9 @@ export class ProgressSync {
   private onHide = () => { if (document.visibilityState === 'hidden') this.beacon(); };
   private onPageHide = () => this.beacon();
   onSaved: (p: Progress) => void = () => {};
+  // Whose reading this is. Kept from the start: if the session expires, the
+  // final save on closing still belongs to them.
+  private userId = me();
 
   constructor(private bookId: number) {
     document.addEventListener('visibilitychange', this.onHide);
@@ -145,11 +166,11 @@ export class ProgressSync {
     this.lastSent = key;
     try {
       const stored = await send(this.bookId, body);
-      await queueDelete(this.bookId, body.client_ts);
+      await queueDelete(keyFor(this.bookId, this.userId), body.client_ts);
       this.onSaved(stored);
     } catch {
       this.lastSent = '';
-      await queuePut({ bookId: this.bookId, body });
+      await queuePut(this.userId, this.bookId, body);
       flushQueue();
     }
   }
@@ -166,7 +187,7 @@ export class ProgressSync {
     const ok = navigator.sendBeacon?.(`/api/books/${this.bookId}/progress`, blob);
     if (ok) this.lastSent = key;
     // Keep a copy until a later save confirms it: a re-send is harmless (same client_ts loses).
-    queuePut({ bookId: this.bookId, body });
+    queuePut(this.userId, this.bookId, body);
   }
 
   destroy() {

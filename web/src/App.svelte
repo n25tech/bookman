@@ -6,6 +6,7 @@
   import { connection } from './lib/offline.svelte';
   import { notesSync, setNotesUser } from './lib/notes.svelte';
   import Settings from './pages/Settings.svelte';
+  import { flushQueue } from './lib/progress';
   import Header from './components/Header.svelte';
   import Login from './pages/Login.svelte';
   import Home from './pages/Home.svelte';
@@ -39,7 +40,11 @@
   const reader = $derived(router.match('/read/:id'));
 
   // Notes written offline are sent with the session of the user who wrote them.
-  $effect(() => { setNotesUser(session.user?.id ?? null); });
+  $effect(() => {
+    setNotesUser(session.user?.id ?? null);
+    // Progress queued for this user (perhaps before they signed out) can go now.
+    if (session.user) flushQueue();
+  });
 </script>
 
 {#if connection.offline || notesSync.pending || notesSync.failed}
