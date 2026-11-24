@@ -152,7 +152,7 @@ Use WAL mode, `foreign_keys=ON` and `busy_timeout`.
 - Home: **Continue reading** (by `progress.updated_at`, unfinished), **Recently added**, then libraries.
 - Library view: a grid of covers with a progress overlay; filter by format and status (unread / reading / finished); sort by title, added or last read; search by title and author.
 - Series view: the series' books in natural sort order.
-- Book detail: cover, metadata, progress, reading history (from `reading_sessions`), notes count, and buttons for Read / Mark finished / Reset progress.
+- Book detail: cover, metadata, progress, reading history (from `reading_sessions`), notes count, and buttons for Read / Mark finished / Reset progress. Admins can edit the title and author; the edit is stored in the database only (the file and its hash are untouched) and survives rescans and moves, since scans read file metadata only when a book is first added.
 
 ## HTTP API (JSON, under `/api`)
 
@@ -161,6 +161,7 @@ POST   /auth/login            POST /auth/logout       GET /auth/me
 GET    /libraries             GET  /libraries/{id}/books?q=&format=&status=&sort=
 GET    /series/{id}
 GET    /books/{id}            GET  /books/{id}/cover  (cached image, ETag)
+PATCH  /books/{id}            {title?, author?} (admin)
 GET    /books/{id}/file       (raw file; must support Range via http.ServeContent)
 GET    /books/{id}/pages/{n}  (comics; image bytes, long cache headers)
 GET    /books/{id}/progress   PUT  /books/{id}/progress

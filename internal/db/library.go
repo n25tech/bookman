@@ -501,3 +501,17 @@ func (d *DB) SetBookError(ctx context.Context, id int64, msg string) error {
 	_, err := d.ExecContext(ctx, `UPDATE books SET status = 'error', error_msg = $2, updated_at = $3 WHERE id = $1`, id, msg, Now())
 	return err
 }
+
+// UpdateBookMetadata sets a book's title and author. Scans only read metadata
+// from the file when a book is first added, so the edit survives rescans and moves.
+func (d *DB) UpdateBookMetadata(ctx context.Context, id int64, title, author string) error {
+	res, err := d.ExecContext(ctx, `UPDATE books SET title = $2, author = $3, updated_at = $4 WHERE id = $1`,
+		id, title, author, Now())
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}

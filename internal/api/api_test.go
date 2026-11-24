@@ -229,6 +229,32 @@ func TestAPI(t *testing.T) {
 	book := sv.Books[1] // 4 pages
 	bid := itoa(book.ID)
 
+	// Admins can fix the title and author; they survive a rescan.
+	var edited struct{ Book db.Book }
+	if code := c.do("PATCH", "/api/books/"+bid, map[string]string{"title": "  Issue   Ten ", "author": "Someone"}, &edited); code != 200 {
+		t.Fatalf("edit metadata: %d", code)
+	}
+	if edited.Book.Title != "Issue Ten" || edited.Book.Author != "Someone" {
+		t.Fatalf("edited book %+v", edited.Book)
+	}
+	if code := c.do("PATCH", "/api/books/"+bid, map[string]string{"title": " "}, nil); code != 400 {
+		t.Fatalf("empty title accepted: %d", code)
+	}
+	sc.ScanAll(ctx)
+	c.do("GET", "/api/books/"+bid, nil, &edited)
+	if edited.Book.Title != "Issue Ten" || edited.Book.Author != "Someone" {
+		t.Fatalf("rescan undid the edit: %+v", edited.Book)
+	}
+	if code := c.do("POST", "/api/admin/users", map[string]any{"username": "reader", "password": "password123", "is_admin": false}, nil); code != 201 && code != 200 {
+		t.Fatalf("create reader: %d", code)
+	}
+	rjar, _ := cookiejar.New(nil)
+	rc := &client{t: t, base: ts.URL, http: &http.Client{Jar: rjar}}
+	rc.do("POST", "/api/auth/login", map[string]string{"username": "reader", "password": "password123"}, nil)
+	if code := rc.do("PATCH", "/api/books/"+bid, map[string]string{"title": "Nope"}, nil); code != 403 {
+		t.Fatalf("non-admin edit: %d", code)
+	}
+
 	// Pages and the raw file (with Range).
 	res, _ := c.http.Get(ts.URL + "/api/books/" + bid + "/pages/4")
 	if res.StatusCode != 200 || res.Header.Get("Content-Type") != "image/png" {

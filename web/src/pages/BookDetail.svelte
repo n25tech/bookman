@@ -5,6 +5,7 @@
   import { deviceLabel } from '../lib/device';
   import { clearLocalPosition } from '../lib/progress';
   import type { Book, Library, ReadingSession } from '../lib/types';
+  import { session } from '../lib/session.svelte';
   import Cover from '../components/Cover.svelte';
   import { isSaved, offline, removeBook, saveBook } from '../lib/offline.svelte';
 
@@ -15,6 +16,10 @@
   let sessions = $state<ReadingSession[]>([]);
   let error = $state('');
   let busy = $state(false);
+  let editing = $state(false);
+  let editTitle = $state('');
+  let editAuthor = $state('');
+  let editError = $state('');
 
   async function load() {
     try {
@@ -54,6 +59,27 @@
     } catch (e: any) { alert(e.message); }
     busy = false;
   }
+  function startEdit() {
+    if (!book) return;
+    editTitle = book.title; editAuthor = book.author; editError = ''; editing = true;
+  }
+  async function saveEdit(e: SubmitEvent) {
+    e.preventDefault();
+    if (!book) return;
+    busy = true; editError = '';
+    try {
+      const r = await api.updateBook(id, { title: editTitle.trim(), author: editAuthor.trim() });
+      book.title = r.book.title; book.author = r.book.author;
+      editing = false;
+    } catch (err: any) { editError = err.message; }
+    busy = false;
+  }
+  // A readable title from the file name, as a starting point for messy titles.
+  function fromFilename() {
+    const base = (book?.rel_path ?? '').split('/').pop() ?? '';
+    editTitle = humanize(base.replace(/\.[^.]+$/, '').replace(/[_-](compress(ed)?|scan(ned)?|ocr)$/i, '').replace(/-+/g, ' '));
+  }
+
   const p = $derived(book?.progress);
   // The folders the file is in, for the breadcrumbs.
   const folders = $derived.by(() => {
@@ -77,8 +103,27 @@
             / <a href="/library/{book.library_id}?path={encodeURIComponent(f.path)}">{humanize(f.name)}</a>
           {/each}
         </p>
-        <h1>{book.title}</h1>
-        {#if book.author}<p class="author">{book.author}</p>{/if}
+        {#if editing}
+          <form class="card editor" onsubmit={saveEdit}>
+            <label>Title <input bind:value={editTitle} required maxlength="500" /></label>
+            <label>Author <span class="faint">(optional)</span> <input bind:value={editAuthor} maxlength="500" /></label>
+            <p class="faint small">Saved in bookman only; the file isn't changed. Rescans keep your edits.</p>
+            {#if editError}<p class="error" role="alert">{editError}</p>{/if}
+            <div class="row">
+              <button type="submit" class="primary" disabled={busy || !editTitle.trim()}>Save</button>
+              <button type="button" onclick={() => (editing = false)}>Cancel</button>
+              <button type="button" class="ghost" onclick={fromFilename} title="Rebuild the title from the file name">Use file name</button>
+            </div>
+          </form>
+        {:else}
+          <div class="title-row">
+            <h1>{book.title}</h1>
+            {#if session.user?.is_admin}
+              <button class="ghost edit" onclick={startEdit} title="Edit title and author">Edit</button>
+            {/if}
+          </div>
+          {#if book.author}<p class="author">{book.author}</p>{/if}
+        {/if}
 
         {#if book.status === 'missing'}
           <p class="error">This file is missing from disk. Its progress and notes are kept until it comes back.</p>
@@ -144,6 +189,11 @@
   .layout { display: grid; grid-template-columns: 260px 1fr; gap: 32px; align-items: start; }
   @media (max-width: 700px) { .layout { grid-template-columns: 1fr; } .cover { max-width: 200px; } }
   .crumbs { margin: 0 0 6px; font-size: 0.9rem; color: var(--fg-muted); }
+  .title-row { display: flex; align-items: baseline; gap: 8px; }
+  .title-row .edit { font-size: 0.85rem; color: var(--fg-muted); flex: none; }
+  .editor { display: flex; flex-direction: column; gap: 12px; max-width: 560px; margin: 8px 0 12px; }
+  .editor label { display: flex; flex-direction: column; gap: 4px; font-size: 0.9rem; color: var(--fg-muted); }
+  .small { font-size: 0.82rem; margin: 0; }
   .author { margin-top: -4px; color: var(--fg-muted); font-size: 1.05rem; }
   .actions { margin: 18px 0; }
   .btn.disabled { pointer-events: none; opacity: 0.5; }
