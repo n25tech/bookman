@@ -3,6 +3,9 @@
   import { api, setUnauthorizedHandler } from './lib/api';
   import { router } from './lib/router.svelte';
   import { session } from './lib/session.svelte';
+  import { connection } from './lib/offline.svelte';
+  import { notesSync, setNotesUser } from './lib/notes.svelte';
+  import Settings from './pages/Settings.svelte';
   import Header from './components/Header.svelte';
   import Login from './pages/Login.svelte';
   import Home from './pages/Home.svelte';
@@ -34,7 +37,19 @@
   });
 
   const reader = $derived(router.match('/read/:id'));
+
+  // Notes written offline are sent with the session of the user who wrote them.
+  $effect(() => { setNotesUser(session.user?.id ?? null); });
 </script>
+
+{#if connection.offline || notesSync.pending || notesSync.failed}
+  <a class="offline" aria-live="polite" href="/settings"
+    title="Progress and notes are kept on this device and sent when the server is back. Details in Settings.">
+    {#if connection.offline}Server unreachable · offline copy{/if}
+    {#if notesSync.pending}{connection.offline ? ' · ' : ''}{notesSync.pending} {notesSync.pending === 1 ? 'note' : 'notes'} waiting to sync{/if}
+    {#if notesSync.failed}<span class="error"> · {notesSync.failed} not synced</span>{/if}
+  </a>
+{/if}
 
 {#if !session.ready}
   <div class="empty">Loading…</div>
@@ -64,6 +79,8 @@
     {:else if router.match('/book/:id')}
       {@const p = router.match('/book/:id')!}
       {#key p.id}<BookDetail id={Number(p.id)} />{/key}
+    {:else if router.match('/settings')}
+      <Settings />
     {:else if router.match('/admin') && session.user.is_admin}
       <Admin />
     {:else}
@@ -71,3 +88,12 @@
     {/if}
   </main>
 {/if}
+
+<style>
+  .offline {
+    position: fixed; left: 12px; bottom: 12px; z-index: 200;
+    padding: 4px 10px; border-radius: 999px; font-size: 12px;
+    background: var(--bg-elev); color: var(--fg-muted); border: 1px solid var(--border);
+    box-shadow: 0 2px 8px rgb(0 0 0 / 0.15); text-decoration: none;
+  }
+</style>

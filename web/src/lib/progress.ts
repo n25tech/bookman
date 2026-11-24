@@ -2,33 +2,14 @@
 // a sendBeacon flush when the page is hidden, and an IndexedDB queue (latest
 // position per book only) for saves that failed, retried with backoff.
 import { deviceId } from './device';
+import { idb as idbStore, PROGRESS_STORE } from './idb';
 import type { Progress } from './types';
+
+const idb = <T>(mode: IDBTransactionMode, f: (s: IDBObjectStore) => IDBRequest<T>) => idbStore<T>(PROGRESS_STORE, mode, f);
 
 export interface Position { page: number; offset: number }
 interface Pending { bookId: number; body: SaveBody }
 interface SaveBody { page: number; offset: number; client_ts: number; device: string }
-
-const DB_NAME = 'bookman';
-const STORE = 'pending-progress';
-
-function openDB(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, 1);
-    req.onupgradeneeded = () => req.result.createObjectStore(STORE, { keyPath: 'bookId' });
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
-}
-
-async function idb<T>(mode: IDBTransactionMode, f: (s: IDBObjectStore) => IDBRequest<T>): Promise<T> {
-  const db = await openDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE, mode);
-    const req = f(tx.objectStore(STORE));
-    tx.oncomplete = () => { db.close(); resolve(req.result); };
-    tx.onerror = () => { db.close(); reject(tx.error); };
-  });
-}
 
 async function queuePut(p: Pending) {
   try {

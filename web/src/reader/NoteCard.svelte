@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { api } from '../lib/api';
+  import { updateNote } from '../lib/notes.svelte';
   import { renderMarkdown } from '../lib/markdown';
   import { ago } from '../lib/format';
   import type { Note } from '../lib/types';
@@ -38,7 +38,8 @@
 
   let editing = $state(autofocus || !note.body_md);
   let body = $state(note.body_md);
-  let saving = $state<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  let saving = $state<'idle' | 'saving' | 'saved' | 'queued' | 'error'>('idle');
+  let saveError = $state('');
   let timer: number | undefined;
   const colors = ['yellow', 'green', 'blue', 'pink'];
 
@@ -48,19 +49,20 @@
     if (body === note.body_md) return;
     saving = 'saving';
     try {
-      const n = await api.updateNote(note.id, { body_md: body });
-      onchange(n);
-      saving = 'saved';
-    } catch {
+      // Kept on this device and sent later if the server can't be reached.
+      const r = await updateNote(note, { body_md: body });
+      onchange(r.note);
+      saving = r.queued ? 'queued' : 'saved';
+    } catch (e: any) {
       saving = 'error';
-      timer = window.setTimeout(save, 5000);
+      saveError = e?.message ?? 'refused by the server';
     }
   }
   // Autosave 800 ms after typing stops.
   function onInput() { clearTimeout(timer); saving = 'idle'; timer = window.setTimeout(save, 800); }
 
   async function setColor(c: string) {
-    try { onchange(await api.updateNote(note.id, { color: c })); } catch {}
+    try { onchange((await updateNote(note, { color: c })).note); } catch {}
   }
 
   function focusOnMount(el: HTMLTextAreaElement) { if (autofocus) setTimeout(() => el.focus(), 0); }
@@ -77,7 +79,7 @@
     {/if}
     <span class="faint small">{ago(note.updated_at)}</span>
     <span class="spacer"></span>
-    {#if saving === 'saving'}<span class="faint small">Saving…</span>{:else if saving === 'saved'}<span class="faint small">Saved</span>{:else if saving === 'error'}<span class="error small">Not saved, retrying</span>{/if}
+    {#if saving === 'saving'}<span class="faint small">Saving…</span>{:else if saving === 'saved'}<span class="faint small">Saved</span>{:else if saving === 'queued'}<span class="faint small" title="The server can't be reached. The note is kept on this device and sent when it is back.">Saved on this device</span>{:else if saving === 'error'}<span class="error small" title={saveError}>Not saved: {saveError}</span>{/if}
     <button class="ghost icon small" onclick={() => { if (editing) save(); editing = !editing; }} title={editing ? 'Preview' : 'Edit'}>{editing ? 'Preview' : 'Edit'}</button>
     <button class="ghost icon small danger" onclick={() => ondelete(note)} title="Delete note" aria-label="Delete note">✕</button>
   </header>

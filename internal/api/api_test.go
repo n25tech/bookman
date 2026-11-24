@@ -313,6 +313,19 @@ func TestAPI(t *testing.T) {
 	if len(notes) != 1 {
 		t.Fatal("undo failed")
 	}
+	// A create sent twice with the same client_id (an offline queue retrying
+	// after a lost answer) makes one note and returns it both times.
+	var q1, q2 db.Note
+	if code := c.do("POST", "/api/books/"+bid+"/notes", map[string]any{"page": 3, "body_md": "queued", "client_id": "c-1"}, &q1); code != 201 {
+		t.Fatalf("create with client_id: %d", code)
+	}
+	if code := c.do("POST", "/api/books/"+bid+"/notes", map[string]any{"page": 3, "body_md": "queued again", "client_id": "c-1"}, &q2); code != 200 || q2.ID != q1.ID || q2.BodyMD != "queued" {
+		t.Fatalf("retried create: %d %+v", code, q2)
+	}
+	if code := c.do("POST", "/api/books/"+bid+"/notes", map[string]any{"page": 3, "client_id": strings.Repeat("x", 65)}, nil); code != 400 {
+		t.Fatalf("long client_id: %d", code)
+	}
+	c.do("DELETE", "/api/notes/"+itoa(q1.ID), nil, nil)
 	// A book note (page 0) with page links; it can't carry a text anchor.
 	if code := c.do("POST", "/api/books/"+bid+"/notes", map[string]any{"page": 0, "body_md": "Themes: see [[p. 3]] and [the ending](#page=4)."}, nil); code != 201 {
 		t.Fatalf("book note: %d", code)

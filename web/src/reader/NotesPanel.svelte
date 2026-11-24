@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { api } from '../lib/api';
+  import { createNote, sortNotes, updateNote } from '../lib/notes.svelte';
   import type { Book, Note } from '../lib/types';
   import NoteCard from './NoteCard.svelte';
 
@@ -19,15 +19,15 @@
   async function addPageNote(page = currentPage) {
     error = '';
     try {
-      const n = await api.createNote(book.id, { page, body_md: '' });
-      notes = [...notes, n].sort((a, b) => a.page - b.page || (a.anchor_start ?? 0) - (b.anchor_start ?? 0));
+      const n = await createNote(book.id, { page, body_md: '' });
+      notes = sortNotes([...notes, n]);
       focusId = n.id;
     } catch (e: any) { error = e.message; }
   }
 
   async function remove(n: Note) {
     try {
-      await api.deleteNote(n.id);
+      await updateNote(n, { deleted: true });
       notes = notes.filter((x) => x.id !== n.id);
       if (undo) clearTimeout(undo.timer);
       undo = { note: n, timer: window.setTimeout(() => (undo = null), 6000) };
@@ -40,8 +40,10 @@
     clearTimeout(undo.timer);
     undo = null;
     try {
-      const r = await api.updateNote(n.id, { deleted: false });
-      notes = [...notes, r].sort((a, b) => a.page - b.page || (a.anchor_start ?? 0) - (b.anchor_start ?? 0));
+      // The note may have reached the server since it was deleted: use its current id.
+      const cur = { ...n, id: n.id < 0 ? notes.find((x) => x.client_id === n.client_id)?.id ?? n.id : n.id };
+      const r = await updateNote(cur, { deleted: false });
+      notes = sortNotes([...notes.filter((x) => !(r.note.client_id && x.client_id === r.note.client_id)), r.note]);
     } catch (e: any) { error = e.message; }
   }
 
@@ -65,7 +67,7 @@
         <span class="spacer"></span>
         <button class="ghost small" onclick={() => addPageNote(0)} title="A note about the whole book, shown on every page">+ Book note</button>
       </div>
-      {#each bookNotes as n (n.id)}
+      {#each bookNotes as n (n.client_id || n.id)}
         <NoteCard note={n} autofocus={focusId === n.id} {currentPage} {onjump} {onpage} ondelete={remove} onchange={changed} />
       {:else}
         <p class="faint hint">Thoughts on the whole book, kept on every page. Link to pages with [[p. 12]] or the 🔗 button.</p>
@@ -76,7 +78,7 @@
       <p class="faint hint">Tip: select text in the book to add a highlighted note.</p>
     {/if}
     {#if error}<p class="error">{error}</p>{/if}
-    {#each visible as n (n.id)}
+    {#each visible as n (n.client_id || n.id)}
       <NoteCard note={n} autofocus={focusId === n.id} {currentPage} {onjump} {onpage} ondelete={remove} onchange={changed} />
     {:else}
       <p class="faint empty">{tab === 'page' ? 'No notes on this page.' : 'No notes in this book yet.'}</p>

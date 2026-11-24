@@ -5,6 +5,7 @@
   import { deviceLabel } from '../lib/device';
   import type { Book, Library, ReadingSession } from '../lib/types';
   import Cover from '../components/Cover.svelte';
+  import { isSaved, offline, removeBook, saveBook } from '../lib/offline.svelte';
 
   let { id }: { id: number } = $props();
   let book = $state<Book | null>(null);
@@ -22,6 +23,19 @@
     } catch (e: any) { error = e.message; }
   }
   onMount(load);
+
+  // Offline copy of this book.
+  let saved = $state(false);
+  const savingThis = $derived(offline.saving?.id === id);
+  $effect(() => {
+    // Re-check when a save of this book finishes.
+    if (!savingThis) isSaved(id).then((v) => (saved = v));
+  });
+  function toggleSaved() {
+    if (!book) return;
+    if (saved || savingThis) removeBook(id).then(() => (saved = false));
+    else saveBook(book, { force: true });
+  }
 
   async function toggleFinished() {
     if (!book) return;
@@ -77,7 +91,13 @@
           </a>
           <button onclick={toggleFinished} disabled={busy}>{p?.finished ? 'Mark unfinished' : 'Mark finished'}</button>
           <button onclick={reset} disabled={busy || !p}>Reset progress</button>
+          {#if offline.supported && book.status === 'ok'}
+            <button onclick={toggleSaved} title={saved ? 'Remove the copy kept on this device' : 'Keep a copy on this device to read with the server down'}>
+              {#if savingThis && offline.saving}Saving… {Math.round((offline.saving.done / Math.max(1, offline.saving.total)) * 100)}% (stop){:else if saved}Saved offline ✓ (remove){:else}Save offline · {bytes(book.file_size)}{/if}
+            </button>
+          {/if}
         </div>
+        {#if offline.lastError && offline.lastErrorBook === id}<p class="error">{offline.lastError}</p>{/if}
 
         <div class="progress">
           <div class="bar"><div style="width: {percent(p?.finished ? 1 : p?.percent)}"></div></div>
