@@ -18,7 +18,7 @@ export interface ReadingSession { id: number; device: string; start_page: number
 export interface Note {
   id: number; book_id: number; page: number; body_md: string; quote: string | null;
   anchor_start: number | null; anchor_end: number | null; color: string | null;
-  created_at: number; updated_at: number; deleted_at?: number | null;
+  created_at: number; updated_at: number; deleted_at?: number | null; client_id?: string | null;
 }
 export interface Folder {
   name: string; path: string; book_count: number; finished_count: number; reading_count: number;

@@ -1,3 +1,4 @@
+import { connection } from './offline.svelte';
 import type { AdminLibrary, Book, BrowseResult, FsListing, Library, Note, Progress, ReadingSession, Series, User } from './types';
 
 export class ApiError extends Error {
@@ -18,8 +19,11 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });
   } catch {
+    connection.offline = true;
     throw new ApiError(0, 'Network error: the server could not be reached.');
   }
+  // The service worker answered from its cache because the server is unreachable.
+  connection.offline = res.headers.has('X-Bookman-Offline');
   if (res.status === 401 && !path.startsWith('/auth/')) onUnauthorized();
   const text = await res.text();
   let data: any = null;

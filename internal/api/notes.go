@@ -52,17 +52,26 @@ func (s *Server) createNote(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "text anchors are only supported for PDFs")
 		return
 	}
+	if n.ClientID != nil && (*n.ClientID == "" || len(*n.ClientID) > 64) {
+		writeError(w, http.StatusBadRequest, "invalid client_id")
+		return
+	}
 	if (n.AnchorStart == nil) != (n.AnchorEnd == nil) || (n.AnchorStart != nil && *n.AnchorStart > *n.AnchorEnd) {
 		writeError(w, http.StatusBadRequest, "invalid anchor")
 		return
 	}
 	n.BookID = b.ID
-	created, err := s.DB.CreateNote(r.Context(), userFrom(r).ID, n)
+	note, created, err := s.DB.CreateNote(r.Context(), userFrom(r).ID, n)
 	if err != nil {
 		serverError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, created)
+	if !created {
+		// A retry of a create that already went through.
+		writeJSON(w, http.StatusOK, note)
+		return
+	}
+	writeJSON(w, http.StatusCreated, note)
 }
 
 func (s *Server) updateNote(w http.ResponseWriter, r *http.Request) {

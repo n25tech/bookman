@@ -1,6 +1,8 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { api } from '../lib/api';
+  import { clearUserData } from '../lib/offline.svelte';
+  import { notesSync } from '../lib/notes.svelte';
   import { router } from '../lib/router.svelte';
   import { session } from '../lib/session.svelte';
   import { libraries, refreshLibraries } from '../lib/libraries.svelte';
@@ -10,7 +12,10 @@
   onMount(() => { refreshLibraries().catch(() => {}); });
 
   async function logout() {
+    const waiting = notesSync.pending + notesSync.failed;
+    if (waiting && !confirm(`${waiting} ${waiting === 1 ? 'note hasn\'t' : 'notes haven\'t'} reached the server yet. They stay on this device and are sent the next time you sign in here. Sign out?`)) return;
     await api.logout().catch(() => {});
+    await clearUserData();
     session.user = null;
     router.go('/', true);
   }
@@ -27,6 +32,7 @@
   </nav>
   <div class="spacer"></div>
   <ThemeToggle />
+  <a class="btn ghost" href="/settings" title="Settings: offline reading and sync">Settings</a>
   {#if session.user?.is_admin}
     <a class="btn ghost" href="/admin" title="Admin">Admin</a>
   {/if}

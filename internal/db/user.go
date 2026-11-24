@@ -37,6 +37,8 @@ type Note struct {
 	CreatedAt   int64   `json:"created_at"`
 	UpdatedAt   int64   `json:"updated_at"`
 	DeletedAt   *int64  `json:"deleted_at,omitempty"`
+	// ClientID is chosen by the browser so a retried create is idempotent.
+	ClientID *string `json:"client_id"`
 }
 
 // Querier is satisfied by *sql.DB, *sql.Tx and *sql.Conn.
@@ -145,11 +147,11 @@ func (d *DB) Sessions(ctx context.Context, userID, bookID int64) ([]ReadingSessi
 	return out, rows.Err()
 }
 
-const noteColumns = `id, book_id, page, body_md, quote, anchor_start, anchor_end, color, created_at, updated_at, deleted_at`
+const noteColumns = `id, book_id, page, body_md, quote, anchor_start, anchor_end, color, created_at, updated_at, deleted_at, client_id`
 
 func scanNote(r scanner) (Note, error) {
 	var n Note
-	err := r.Scan(&n.ID, &n.BookID, &n.Page, &n.BodyMD, &n.Quote, &n.AnchorStart, &n.AnchorEnd, &n.Color, &n.CreatedAt, &n.UpdatedAt, &n.DeletedAt)
+	err := r.Scan(&n.ID, &n.BookID, &n.Page, &n.BodyMD, &n.Quote, &n.AnchorStart, &n.AnchorEnd, &n.Color, &n.CreatedAt, &n.UpdatedAt, &n.DeletedAt, &n.ClientID)
 	return n, err
 }
 
@@ -178,12 +180,21 @@ func (d *DB) NoteCount(ctx context.Context, userID, bookID int64) (int, error) {
 	return n, err
 }
 
-func (d *DB) CreateNote(ctx context.Context, userID int64, n Note) (Note, error) {
+// CreateNote inserts a note. A note with the same client_id already exists when
+// a create is retried: that note is returned unchanged (created=false).
+func (d *DB) CreateNote(ctx context.Context, userID int64, n Note) (note Note, created bool, err error) {
 	now := Now()
-	return scanNote(d.QueryRowContext(ctx, `
-		INSERT INTO notes (user_id, book_id, page, body_md, quote, anchor_start, anchor_end, color, created_at, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$9) RETURNING `+noteColumns,
-		userID, n.BookID, n.Page, n.BodyMD, n.Quote, n.AnchorStart, n.AnchorEnd, n.Color, now))
+	note, err = scanNote(d.QueryRowContext(ctx, `
+		INSERT INTO notes (user_id, book_id, page, body_md, quote, anchor_start, anchor_end, color, created_at, updated_at, client_id)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$9,$10)
+		ON CONFLICT (user_id, client_id) WHERE client_id IS NOT NULL DO NOTHING
+		RETURNING `+noteColumns,
+		userID, n.BookID, n.Page, n.BodyMD, n.Quote, n.AnchorStart, n.AnchorEnd, n.Color, now, n.ClientID))
+	if err == sql.ErrNoRows && n.ClientID != nil {
+		note, err = scanNote(d.QueryRowContext(ctx, `SELECT `+noteColumns+` FROM notes WHERE user_id = $1 AND client_id = $2`, userID, *n.ClientID))
+		return note, false, err
+	}
+	return note, true, err
 }
 
 // NotePatch holds the optional fields of PATCH /notes/{id}.

@@ -4,6 +4,8 @@
   import { router } from '../lib/router.svelte';
   import { deviceId, deviceLabel } from '../lib/device';
   import { percent } from '../lib/format';
+  import { saveBook } from '../lib/offline.svelte';
+  import { createNote, onNoteSynced, retryable, sortNotes, withPending } from '../lib/notes.svelte';
   import { ProgressSync, localPosition, pendingFor, type Position } from '../lib/progress';
   import type { Book, Note, Progress } from '../lib/types';
   import ThemeToggle from '../components/ThemeToggle.svelte';
@@ -30,16 +32,26 @@
   let finished = $state(false);
   let viewer = $state<ViewerApi>();
   let sync: ProgressSync | null = null;
+  let saveTimer: number | undefined;
+
+  // With the server down and no cached copy, open the book without its notes
+  // rather than not at all (notes written now are queued as usual).
+  const notesOrNone = (bookId: number) => api.notes(bookId).catch((e) => { if (retryable(e)) return [] as Note[]; throw e; });
 
   const ahead = (a: Position, b: Position) => a.page - 1 + a.offset > b.page - 1 + b.offset + 0.001;
 
   onMount(() => {
     (async () => {
       try {
-        const [r, n, pending] = await Promise.all([api.book(id), api.notes(id), pendingFor(id)]);
+        const [r, n, pending] = await Promise.all([api.book(id), notesOrNone(id), pendingFor(id)]);
         if (r.book.status !== 'ok') { error = r.book.status === 'missing' ? 'This file is missing from disk.' : `This file can't be read: ${r.book.error_msg}`; return; }
         book = r.book;
-        notes = n;
+        // Notes not yet sent from this device are shown as they will be.
+        notes = await withPending(id, n);
+        // In the background, for reading with the server down; after a pause so it
+        // doesn't compete with the first pages.
+        const b = r.book;
+        saveTimer = window.setTimeout(() => saveBook(b), 5000);
         const server = r.book.progress;
         finished = !!server?.finished;
         const local = localPosition(id);
@@ -67,7 +79,12 @@
         error = e.message;
       }
     })();
-    return () => sync?.destroy();
+    // A note written offline reached the server: take its real id.
+    const off = onNoteSynced((bookId, localId, n) => {
+      if (bookId !== id) return;
+      notes = notes.map((x) => (x.id === localId || (n.client_id && x.client_id === n.client_id) ? { ...n, body_md: x.body_md, color: x.color } : x));
+    });
+    return () => { sync?.destroy(); off(); clearTimeout(saveTimer); };
   });
 
   function onposition(p: Position) {
@@ -84,8 +101,8 @@
 
   async function addAnchoredNote(a: NewAnchor) {
     try {
-      const n = await api.createNote(id, { ...a, body_md: '', color: 'yellow' });
-      notes = [...notes, n].sort((x, y) => x.page - y.page || (x.anchor_start ?? 0) - (y.anchor_start ?? 0));
+      const n = await createNote(id, { ...a, body_md: '', color: 'yellow' });
+      notes = sortNotes([...notes, n]);
       focusNote = n.id;
       setPanel(true);
     } catch (e: any) { alert(e.message); }
